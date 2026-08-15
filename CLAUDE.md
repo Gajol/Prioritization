@@ -57,7 +57,11 @@ sync with whatever the Excel workbooks actually implement.
       1. The Position table is 
    3. Management populates other tables such as Centres, 
    4. RatingLookup is also populated so all scoring can be associated a label like "Very High", etc. (A VLOOKUP in excel of Cateogry, MIN:MAX)
-2. Data Collection Phase.  Management sends a request (and link to Excel) to each Centre Lead asking to:
+2. Send Data Collection Excel Files Phase:  Management creates & populates an Excel for each Centre Lead
+   1. Management creates a Excel for each Centre (consistent filenaming convention).  This file is cloned from the "templates".
+   2. Management sets the Centre name in each file to be the Centre-name for the file (or ideally this is auto-done based on the filename or automation)
+   3. Management ensures the data is refreshed (data connection to the preparation phase Excel file)
+3. Data Collection Phase.  Management sends a request (and link to Excel) to each Centre Lead asking to:
    1. Identify Teams : populate Teams table
    2. Indicate which Resources are working on which Teams and Percentage 
    3. Rank each Priority and whether it is Resourced (Resourced indicates the Team is working on it)
@@ -97,6 +101,22 @@ The workflow for a Centre Lead is:
 2. One Excel workbook per Centre, with tabs/tables for data entry.
 3. Protect reference/lookup data on those workbooks so Centre Leads can't
    corrupt it.
+4. Teams Entry
+   1. Maximum 15-teams - sheet should look clean.
+
+# User Interface
+
+### Ranking
+
+- ideally sorted as Rank is entered
+
+### Input Validation
+
+- Percentages are in 5% increments. 
+- Rankings should be in order, 1 being highest. 
+- Duplicate rankings should be highlighted.
+- A Teams allocation to Priorities should total 100%
+- A Resource allocation to Teams should not be greater than 100% (it does not have to total 100%)
 
 ## Outputs
 
@@ -104,6 +124,10 @@ Write these as Markdown in `/docs`:
 
 1. How the Excel files are designed..  Include tools used (for example Python to build data model and links for online help)
 2. A User Guide for Centre Leads.
+
+## References
+
+[Claude Code cheatsheet | Claude Help Center](https://support.claude.com/en/articles/14553413-claude-code-cheatsheet) 
 
 ## Status
 
@@ -123,6 +147,19 @@ Write these as Markdown in `/docs`:
   template, and Power Pivot rejects a relationship whose "one" side is
   mostly blank cells. Re-run wire_data_model.py, which is idempotent,
   once real data exists.)
+  - Row 2 is no longer prefilled with example data (was confusing on a
+    recurring-use workbook); worked example moved into the Instructions
+    tab as text.
+  - Steps 1–3 now have sheet protection: computed columns locked,
+    input columns unlocked.
+  - Both Allocation % columns are dropdowns constrained to 5% steps
+    (list validation) rather than a custom-formula 100%-cap block —
+    Excel can't combine both in one rule; the Total % columns still
+    flag an overage visually. See excel-file-design.md for the
+    trade-off and two more structured-reference gotchas hit while
+    building this (apostrophe in a column name silently breaking
+    `Table[Column]`; structured refs not working inside Data
+    Validation custom formulas).
 - `management/scripts/` and `templates/scripts/` — regenerate each
   workbook (`build_preparation.py` / `build_centre_template.py`) and wire
   it into its Data Model (`wire_data_model.py`, COM automation against a
@@ -135,6 +172,47 @@ Write these as Markdown in `/docs`:
   beyond a generic "repaired records" log. Those three reference tables
   are now named TacticalScores/InitiativeScores/AssistanceScores to
   avoid it.
-- Not yet started: `/docs` outputs (Excel design doc — including the
-  Python/COM tooling used and links to relevant docs — and the Centre
-  Lead user guide).
+- `/docs` — [`excel-file-design.md`](docs/excel-file-design.md) (design,
+  tooling, known gotchas/gaps) and
+  [`centre-lead-user-guide.md`](docs/centre-lead-user-guide.md) written.
+- Known process gap (flagged in excel-file-design.md, not yet built):
+  CLAUDE.md's Process section describes a live data-connection refresh
+  from preparation.xlsx when Management clones a centre file; what's
+  actually built is a static snapshot copy baked in at generation time.
+- PARKED (2026-08-14): Resource x Team matrix PivotTable, sourced from
+  the Power Pivot Data Model, requested to visualize who's on what.
+  Blocked on two unresolved sub-problems before it can be finished:
+  1. Refresh UX — a Data Model PivotTable doesn't auto-sync with
+     worksheet edits, even same-workbook ones. Native (no-VBA) options
+     identified but not yet built/tested: `PivotCache.RefreshOnFileOpen`
+     (refresh when the file opens) and `PivotCache.RefreshPeriod`
+     (background auto-refresh every N minutes) — both are PivotCache
+     properties, not WorkbookConnection properties. A declarative Ribbon
+     XML button referencing the built-in `RefreshAll` command (no VBA)
+     was also proposed as a manual backstop.
+  2. Creating the PivotTable itself via COM automation
+     (`PivotCaches().Create(xlExternal, wb.Connections("ThisWorkbookDataModel"))`
+     then `.CreatePivotTable(...)`) fails with "Reference isn't valid" —
+     confirmed NOT a parameter mistake (tried explicit Version, refreshing
+     the connection first, activating the sheet, ActiveCell as
+     destination — same failure every time; even reading a plain property
+     like `CommandText` off the resulting PivotCache object fails the
+     same way, meaning the cache itself doesn't come out valid via this
+     API against our connection). Manual creation via the Excel UI
+     (Insert -> PivotTable -> "Use this workbook's Data Model") works
+     fine. Root cause not identified — possibly something about how
+     `ThisWorkbookDataModel` differs from a genuinely Power-Query-authored
+     model connection.
+  Separately, discovered and PARKED a real conflict while trying to keep
+  Step 1 - Teams starting from a single blank row (to unblock the
+  Teams-side Data Model relationships, which need a non-blank "one"
+  side): Excel Tables categorically cannot be resized while their sheet
+  is protected — confirmed via two independent native mechanisms
+  (typing into the row below, and `ListRows.Add()` / Insert Table Row),
+  the latter failing identically even with `AllowInsertingRows=True`
+  explicitly granted on `Worksheet.Protect`. So "protect the computed
+  columns" and "let users add team rows without asking Management" are
+  mutually exclusive for a Table on a protected sheet, no VBA. Proposed
+  but not decided: leave Step 1 specifically unprotected (Step 2/3 don't
+  need to grow, since they already have 200 pre-built rows, so keeping
+  those protected is unaffected by this). Revisit before shipping.

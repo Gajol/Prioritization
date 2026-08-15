@@ -26,7 +26,7 @@ import sys
 
 import openpyxl
 from openpyxl.formatting.rule import FormulaRule
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, Protection
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.workbook.defined_name import DefinedName
@@ -68,6 +68,15 @@ def style_body(cell, editable=False, bold=False):
     cell.border = BORDER
     if editable:
         cell.fill = PatternFill("solid", fgColor=YELLOW)
+        cell.protection = Protection(locked=False)
+
+
+def style_computed(cell):
+    """A grey, formula-driven cell: locked (sheet protection must be on
+    for that to matter — see input-sheet setup below)."""
+    cell.fill = PatternFill("solid", fgColor=GREY)
+    cell.font = Font(name=FONT)
+    cell.border = BORDER
 
 
 def read_table(src_wb, sheet_name, header_row=1):
@@ -148,6 +157,16 @@ def main(prep_path, out_path):
          "share of their time goes to that team. Their position fills in "
          "automatically.", None, False),
         ("", None, False),
+        ("Worked example", 12, True),
+        ("Say your centre has a team called 'Analytics Squad', dedicated "
+         "(Yes) and working Tactical priorities. On 'Step 1 - Teams' you'd "
+         "enter: Team Name = Analytics Squad, Resources Dedicated = Yes, "
+         "Priority Type = Tactical. On 'Step 2', a row for that team might "
+         "read: Priority Title = (pick one of the Tactical priorities "
+         "offered), Rank = 1, Resourced = Yes, Allocation % = 60%. On "
+         "'Step 3', a person on that team might read: Resource = (pick "
+         "them), Team Name = Analytics Squad, Allocation % = 50%.", None, False),
+        ("", None, False),
         ("Legend", 12, True),
         ("Yellow cells = type or pick your data here.", None, False),
         ("Grey 'check' columns = calculated automatically. Don't type in them.", None, False),
@@ -155,14 +174,18 @@ def main(prep_path, out_path):
         ("", None, False),
         ("Validation built into this workbook (no macros required)", 12, True),
         ("- Dropdowns keep Team, Type, Priority, Resource, and Position "
-         "entries consistent with the master lists.", None, False),
+         "entries consistent with the master lists, and constrain "
+         "Allocation % entries to 5% steps.", None, False),
         ("- The Priority dropdown is filtered to the team's Priority Type "
          "automatically.", None, False),
-        ("- Excel will refuse a duplicate team name, a duplicate rank within "
-         "a team, or an allocation % that would push a team's priorities or "
-         "a person's time over 100%.", None, False),
-        ("- These checks fire on manual typing/picking. Pasting many rows at "
-         "once can bypass the live block — glance at the check columns "
+        ("- Excel will refuse a duplicate team name or a duplicate rank "
+         "within a team as you type.", None, False),
+        ("- Going over 100% (a team's priorities, or a person's time) isn't "
+         "blocked — the dropdown can't check that and still offer a clean "
+         "list of 5% steps — but the Total % columns turn red immediately, "
+         "so check them before sending this file back.", None, False),
+        ("- The duplicate-name/rank checks fire on manual typing. Pasting "
+         "many rows at once can bypass them — glance at the check columns "
          "before sending this file back.", None, False),
         ("", None, False),
         ("Centre Info", 12, True),
@@ -293,7 +316,15 @@ def main(prep_path, out_path):
     for i, val in enumerate(["Yes", "No"]):
         ws.cell(row=4 + i, column=5, value=val).font = Font(name=FONT)
     wb.defined_names["YesNoList"] = DefinedName("YesNoList", attr_text="Lookups!$E$4:$E$5")
-    for col, w in [("A", 16), ("C", 16), ("E", 10)]:
+    ws["G3"] = "Allocation % (5% steps)"
+    ws["G3"].font = Font(name=FONT, bold=True)
+    for i in range(21):  # 0%, 5%, ..., 100%
+        cell = ws.cell(row=4 + i, column=7, value=i * 0.05)
+        cell.font = Font(name=FONT)
+        cell.number_format = "0%"
+    wb.defined_names["PercentIncrementsList"] = DefinedName(
+        "PercentIncrementsList", attr_text="Lookups!$G$4:$G$24")
+    for col, w in [("A", 16), ("C", 16), ("E", 10), ("G", 20)]:
         ws.column_dimensions[col].width = w
 
     last_row = N_ROWS + 1
@@ -308,30 +339,40 @@ def main(prep_path, out_path):
         ws.column_dimensions[get_column_letter(i)].width = w
         style_header(ws.cell(row=1, column=i, value=h))
 
-    example_team = ("Analytics Squad", "Yes", "Tactical")
-    for i, val in enumerate(example_team, start=1):
-        style_body(ws.cell(row=2, column=i, value=val))
-
-    for r in range(2, last_row + 1):
-        style_body(ws.cell(row=r, column=1), editable=(r != 2))
-        style_body(ws.cell(row=r, column=2), editable=(r != 2))
-        style_body(ws.cell(row=r, column=3), editable=(r != 2))
+    # Teams starts with exactly one blank data row (not a pre-built block
+    # of 200) plus a 14-row buffer below it (Team #2..#15 — CLAUDE.md caps
+    # this sheet at 15 teams so it "stays clean"). Only row 2 is part of
+    # the Table's official range; rows 3-16 are pre-unlocked, validated,
+    # and formatted so typing into row 3 both (a) is actually possible —
+    # under sheet protection a locked cell can't be typed into regardless
+    # of Table auto-extend, which is what made a true "just one row, grow
+    # organically" design impossible — and (b) grows the Table to absorb
+    # that row, D/E formulas included, since D/E are genuine calculated
+    # columns of this table (not adjacent grey cells outside it, which
+    # would silently NOT auto-fill on extend). The small starting size is
+    # also what unblocks the Data Model relationship to Teams: Power
+    # Pivot rejects a relationship whose "one" side looks like duplicate
+    # blanks, which 200 mostly-empty rows guaranteed and 1 does not.
+    teams_last_row = 2
+    teams_buffer_row = 16
+    for r in range(2, teams_buffer_row + 1):
+        style_body(ws.cell(row=r, column=1), editable=True)
+        style_body(ws.cell(row=r, column=2), editable=True)
+        style_body(ws.cell(row=r, column=3), editable=True)
         for col in (4, 5):
             cell = ws.cell(row=r, column=col)
-            cell.fill = PatternFill("solid", fgColor=GREY)
-            cell.font = Font(name=FONT)
+            style_computed(cell)
             cell.number_format = "0%"
-            cell.border = BORDER
         ws.cell(row=r, column=4).value = (
-            f"=IF($A{r}=\"\",\"\",SUMIFS('Step 2 - Priorities & Ranking'!$F$2:$F${last_row},"
-            f"'Step 2 - Priorities & Ranking'!$A$2:$A${last_row},$A{r}))"
+            f'=IF($A{r}="","",SUMIFS(Priorities[Allocation % of Team Effort],'
+            f'Priorities[Team Name],$A{r}))'
         )
         ws.cell(row=r, column=5).value = (
-            f"=IF($A{r}=\"\",\"\",SUMIFS('Step 3 - Resource Allocation'!$D$2:$D${last_row},"
-            f"'Step 3 - Resource Allocation'!$C$2:$C${last_row},$A{r}))"
+            f'=IF($A{r}="","",SUMIFS(ResourceAllocation[Allocation % of Person Effort],'
+            f'ResourceAllocation[Team Name],$A{r}))'
         )
 
-    tab = Table(displayName="Teams", ref=f"A1:C{last_row}")
+    tab = Table(displayName="Teams", ref=f"A1:E{teams_last_row}")
     tab.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
     ws.add_table(tab)
     wb.defined_names["TeamNameList"] = DefinedName("TeamNameList", attr_text="Teams[Team Name]")
@@ -340,23 +381,29 @@ def main(prep_path, out_path):
     dv_resources.error = "Choose Yes, No, or Temp."
     dv_resources.errorTitle = "Invalid entry"
     ws.add_data_validation(dv_resources)
-    dv_resources.add(f"B3:B{last_row}")
+    dv_resources.add(f"B2:B{teams_buffer_row}")
 
     dv_type = DataValidation(type="list", formula1="=PriorityTypeList", allow_blank=True)
     dv_type.error = "Choose Tactical, Initiative, or Assistance."
     dv_type.errorTitle = "Invalid entry"
     ws.add_data_validation(dv_type)
-    dv_type.add(f"C3:C{last_row}")
+    dv_type.add(f"C2:C{teams_buffer_row}")
 
+    # Plain range, not Teams[Team Name]: a structured reference here (valid
+    # syntax, verified by hand) made Excel strip Data Validation from this
+    # sheet on open — Data Validation formulas apparently don't support
+    # Table structured references the way regular cell formulas do.
     dv_unique_team = DataValidation(
         type="custom",
-        formula1=f'=AND($A3<>"",COUNTIF($A$2:$A${last_row},$A3)=1)',
+        formula1=f'=AND($A2<>"",COUNTIF($A$2:$A${teams_buffer_row},$A2)=1)',
         allow_blank=True,
     )
     dv_unique_team.error = "Team names must be unique within this workbook."
     dv_unique_team.errorTitle = "Duplicate team name"
     ws.add_data_validation(dv_unique_team)
-    dv_unique_team.add(f"A3:A{last_row}")
+    dv_unique_team.add(f"A2:A{teams_buffer_row}")
+
+    ws.protection.sheet = True
 
     for op, colour, text_colour in (
         ('AND($A2<>"",$D2>1)', RED, RED_TEXT),
@@ -364,11 +411,11 @@ def main(prep_path, out_path):
         ('AND($A2<>"",$D2=1)', GREEN, GREEN_TEXT),
     ):
         ws.conditional_formatting.add(
-            f"D2:D{last_row}",
+            f"D2:D{teams_buffer_row}",
             FormulaRule(formula=[op], fill=PatternFill("solid", fgColor=colour),
                         font=Font(name=FONT, color=text_colour))
         )
-    ws.freeze_panes = "A3"
+    ws.freeze_panes = "A2"
 
     # ================================================================= Step 2 - Priorities & Ranking
     ws = wb.create_sheet("Step 2 - Priorities & Ranking")
@@ -380,22 +427,15 @@ def main(prep_path, out_path):
         ws.column_dimensions[get_column_letter(i)].width = w
         style_header(ws.cell(row=1, column=i, value=h))
 
-    example_priority = ("Analytics Squad", pr_rows_sorted[0][0], None, 1, "Yes", 0.6)
-    for i, val in enumerate(example_priority, start=1):
-        if val is not None:
-            style_body(ws.cell(row=2, column=i, value=val))
-
     for r in range(2, last_row + 1):
-        style_body(ws.cell(row=r, column=1), editable=(r != 2))
-        style_body(ws.cell(row=r, column=2), editable=(r != 2))
+        style_body(ws.cell(row=r, column=1), editable=True)
+        style_body(ws.cell(row=r, column=2), editable=True)
         c3 = ws.cell(row=r, column=3)
-        c3.fill = PatternFill("solid", fgColor=GREY)
-        c3.font = Font(name=FONT)
-        c3.border = BORDER
+        style_computed(c3)
         c3.value = f'=IF($A{r}="","",IFERROR(INDEX(Teams[Priority Type],MATCH($A{r},Teams[Team Name],0)),"unknown team"))'
-        style_body(ws.cell(row=r, column=4), editable=(r != 2))
-        style_body(ws.cell(row=r, column=5), editable=(r != 2))
-        style_body(ws.cell(row=r, column=6), editable=(r != 2))
+        style_body(ws.cell(row=r, column=4), editable=True)
+        style_body(ws.cell(row=r, column=5), editable=True)
+        style_body(ws.cell(row=r, column=6), editable=True)
         ws.cell(row=r, column=6).number_format = "0%"
 
     tab = Table(displayName="Priorities", ref=f"A1:F{last_row}")
@@ -406,78 +446,73 @@ def main(prep_path, out_path):
     dv_team2.error = "Pick a team defined on 'Step 1 - Teams'."
     dv_team2.errorTitle = "Unknown team"
     ws.add_data_validation(dv_team2)
-    dv_team2.add(f"A3:A{last_row}")
+    dv_team2.add(f"A2:A{last_row}")
 
     # Dependent dropdown: the list source is INDIRECT(this row's auto Type),
     # which resolves to the defined name "Tactical"/"Initiative"/"Assistance"
     # — so only priorities matching the team's type are offered.
-    dv_priority = DataValidation(type="list", formula1="=INDIRECT($C3)", allow_blank=True)
+    dv_priority = DataValidation(type="list", formula1="=INDIRECT($C2)", allow_blank=True)
     dv_priority.error = "Pick a priority from Management's master list, matching the team's Priority Type."
     dv_priority.errorTitle = "Unknown priority"
     ws.add_data_validation(dv_priority)
-    dv_priority.add(f"B3:B{last_row}")
+    dv_priority.add(f"B2:B{last_row}")
 
     dv_resourced = DataValidation(type="list", formula1="=YesNoList", allow_blank=True)
     dv_resourced.error = "Choose Yes or No."
     dv_resourced.errorTitle = "Invalid entry"
     ws.add_data_validation(dv_resourced)
-    dv_resourced.add(f"E3:E{last_row}")
+    dv_resourced.add(f"E2:E{last_row}")
 
+    # Plain ranges here too — see the note on dv_unique_team above.
     dv_rank = DataValidation(
         type="custom",
-        formula1=(f'=AND($D3<>"",$D3=INT($D3),$D3>0,'
-                  f'COUNTIFS($A$2:$A${last_row},$A3,$D$2:$D${last_row},$D3)=1)'),
+        formula1=(f'=AND($D2<>"",$D2=INT($D2),$D2>0,'
+                  f'COUNTIFS($A$2:$A${last_row},$A2,$D$2:$D${last_row},$D2)=1)'),
         allow_blank=True,
     )
     dv_rank.error = "Rank must be a positive whole number, unique within the team."
     dv_rank.errorTitle = "Invalid rank"
     ws.add_data_validation(dv_rank)
-    dv_rank.add(f"D3:D{last_row}")
+    dv_rank.add(f"D2:D{last_row}")
 
-    dv_alloc2 = DataValidation(
-        type="custom",
-        formula1=(f'=AND($F3>0,$F3<=1,'
-                  f'SUMIFS($F$2:$F${last_row},$A$2:$A${last_row},$A3)<=1)'),
-        allow_blank=True,
-    )
-    dv_alloc2.error = "Must be between 0% and 100%, and the team's priorities can't total more than 100%."
-    dv_alloc2.errorTitle = "Allocation over 100%"
+    # A dropdown (list) and a hard "team total <=100%" block can't coexist
+    # in one native Data Validation rule — this picks the dropdown; the
+    # Priority Allocation Total column on Step 1 still flags an overage
+    # visually (red), just not as a typing-time block.
+    dv_alloc2 = DataValidation(type="list", formula1="=PercentIncrementsList", allow_blank=True)
+    dv_alloc2.error = "Pick a value from the dropdown (5% steps)."
+    dv_alloc2.errorTitle = "Invalid entry"
     ws.add_data_validation(dv_alloc2)
-    dv_alloc2.add(f"F3:F{last_row}")
+    dv_alloc2.add(f"F2:F{last_row}")
 
-    ws.freeze_panes = "A3"
+    ws.protection.sheet = True
+    ws.freeze_panes = "A2"
 
     # ================================================================= Step 3 - Resource Allocation
     ws = wb.create_sheet("Step 3 - Resource Allocation")
     ws.sheet_view.showGridLines = False
     headers = ["Resource", "Position Title (auto)", "Team Name",
-               "Allocation % of Person's Time", "Person Total %"]
+               "Allocation % of Person Effort", "Person Total %"]
     widths = [26, 26, 22, 24, 16]
     for i, (h, w) in enumerate(zip(headers, widths), start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
         style_header(ws.cell(row=1, column=i, value=h))
 
-    example_resource = (res_rows[0][0] + " " + res_rows[0][1], None, "Analytics Squad", 0.5)
-    style_body(ws.cell(row=2, column=1, value=example_resource[0]))
-    style_body(ws.cell(row=2, column=3, value=example_resource[2]))
-    style_body(ws.cell(row=2, column=4, value=example_resource[3]))
-
     for r in range(2, last_row + 1):
-        style_body(ws.cell(row=r, column=1), editable=(r != 2))
+        style_body(ws.cell(row=r, column=1), editable=True)
         c2 = ws.cell(row=r, column=2)
-        c2.fill = PatternFill("solid", fgColor=GREY)
-        c2.font = Font(name=FONT)
-        c2.border = BORDER
+        style_computed(c2)
         c2.value = f'=IF($A{r}="","",IFERROR(INDEX(Resources[PositionTitle],MATCH($A{r},Resources[FullName],0)),"unknown resource"))'
-        style_body(ws.cell(row=r, column=3), editable=(r != 2))
-        style_body(ws.cell(row=r, column=4), editable=(r != 2))
+        style_body(ws.cell(row=r, column=3), editable=True)
+        style_body(ws.cell(row=r, column=4), editable=True)
         ws.cell(row=r, column=4).number_format = "0%"
         c5 = ws.cell(row=r, column=5)
-        c5.fill = PatternFill("solid", fgColor=GREY)
-        c5.font = Font(name=FONT)
-        c5.border = BORDER
+        style_computed(c5)
         c5.number_format = "0%"
-        c5.value = f'=IF($A{r}="","",SUMIFS($D$2:$D${last_row},$A$2:$A${last_row},$A{r}))'
+        c5.value = (
+            f'=IF($A{r}="","",SUMIFS(ResourceAllocation[Allocation % of Person Effort],'
+            f'ResourceAllocation[Resource],$A{r}))'
+        )
 
     tab = Table(displayName="ResourceAllocation", ref=f"A1:E{last_row}")
     tab.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
@@ -487,24 +522,23 @@ def main(prep_path, out_path):
     dv_res_name.error = "Pick a person from Management's Resources list."
     dv_res_name.errorTitle = "Unknown resource"
     ws.add_data_validation(dv_res_name)
-    dv_res_name.add(f"A3:A{last_row}")
+    dv_res_name.add(f"A2:A{last_row}")
 
     dv_team3 = DataValidation(type="list", formula1="=TeamNameList", allow_blank=True)
     dv_team3.error = "Pick a team defined on 'Step 1 - Teams'."
     dv_team3.errorTitle = "Unknown team"
     ws.add_data_validation(dv_team3)
-    dv_team3.add(f"C3:C{last_row}")
+    dv_team3.add(f"C2:C{last_row}")
 
-    dv_alloc3 = DataValidation(
-        type="custom",
-        formula1=(f'=AND($D3>0,$D3<=1,$A3<>"",'
-                  f'SUMIFS($D$2:$D${last_row},$A$2:$A${last_row},$A3)<=1)'),
-        allow_blank=True,
-    )
-    dv_alloc3.error = "Must be between 0% and 100%, and this person's total across teams can't exceed 100%."
-    dv_alloc3.errorTitle = "Allocation over 100%"
+    # Dropdown, not a hard block — see the note on dv_alloc2 in Step 2.
+    # Person Total % still flags an overage visually (red).
+    dv_alloc3 = DataValidation(type="list", formula1="=PercentIncrementsList", allow_blank=True)
+    dv_alloc3.error = "Pick a value from the dropdown (5% steps)."
+    dv_alloc3.errorTitle = "Invalid entry"
     ws.add_data_validation(dv_alloc3)
-    dv_alloc3.add(f"D3:D{last_row}")
+    dv_alloc3.add(f"D2:D{last_row}")
+
+    ws.protection.sheet = True
 
     for op, colour, text_colour in (
         ('AND($A2<>"",$E2>1)', RED, RED_TEXT),
@@ -515,7 +549,7 @@ def main(prep_path, out_path):
             FormulaRule(formula=[op], fill=PatternFill("solid", fgColor=colour),
                         font=Font(name=FONT, color=text_colour))
         )
-    ws.freeze_panes = "A3"
+    ws.freeze_panes = "A2"
 
     wb.move_sheet("Instructions", offset=-20)
     wb.active = 0
