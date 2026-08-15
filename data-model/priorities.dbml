@@ -1,0 +1,260 @@
+// DBML Priorities
+// https://github.com/Gajol/Prioritization 
+
+Table Centres {
+	id int [pk]
+	Centre varchar (100)    // full name of centre
+	CentreCode varchar (10) // abbreviation used on data entry
+}
+
+Table Resources {
+  FirstName varchar(15)
+  LastName varchar(15)
+  PositionTitle varchar(50) [ref: > Position.Title]
+} 
+
+Table Position { 
+  Title varchar(50) [primary key]
+  PositionArea PositionArea 
+  Position varchar(7)
+  Level varchar(4)
+  SortingHelper decimal(1,1)
+}
+
+Table Teams {
+  TeamName TeamNames [pk]
+  CentreId int [ref: > Centres.id] 
+
+  Resources YesNo  // Yes, No, Temp
+  Type PriorityType 
+
+  //indexes {
+  //  (TeamName, Type) [pk]
+  //}
+} 
+
+// A Team can work on a Priority - and name is "Team + Priority" since
+Table Priority {
+  Title varchar(80)
+  Type PriorityType
+  Impact varchar(20)   // risk or value (impact, potential)
+  Resources YesNo
+
+  indexes {
+    (Title, Type) [pk]
+  }
+}
+
+
+  
+Table Tactical {
+  PriorityReference varchar(80) [pk, ref: > Priority.Title]
+  Actor Actor
+  ProblemSet int [ref: > ProblemSet.id] 
+  Intent integer [default: 0, note: "min 0, max 5"]
+  Capability integer [default: 0, note: "min 0, max 5"]
+  Consequence integer [default: 0, note: "min 0, max 5"]
+  Likelihood  integer // calculated based on Intent * Capability
+  LikelihoodScore  integer [default: 0, note: "min 0, max 5"]
+  LikelihoodLevel integer [default: 0, note: "min 0, max 5"]
+  RiskBandLevel  integer // calculated based on Likelihood * Consequence
+  RiskLabelId int [ref: > RatingLookup.id] // Lookup Band, Colour based on Risk within minValue:maxValue
+
+}
+
+Table ProblemSet {
+	id int (pk, increment)
+	Title varchar (100)
+	TacticalType  TacticalTypes
+	ProblemSetShortCode varchar (20)
+}
+
+Table Initiative {
+  PriorityReference varchar(80) [pk, ref: > Priority.Title]
+  Actor Actor 
+  InitiativeType int [ref: > InitiativeType.id] 
+  InitiativeShortCode varchar(10)
+  Dividend integer [default: 0, note: "min 0, max 5"]
+  Feasibility integer [default: 0, note: "min 0, max 5"]
+  Cost integer [default: 0, note: "min 0, max 5"]
+  Value  integer // calculated based on Dividend + Feasibility + Cost
+  ValueLabelId int [ref: > RatingLookup.id] // Lookup Band, Colour based on Value within minValue:maxValue
+}
+
+Table InitiativeType {
+  id int [pk, increment]
+  Title InitiativeTypes
+  Level1 Level1Initiative
+  Level2 Level2Initiative
+  InitiativeShortCode varchar(20) [unique]
+}
+
+Table Assistance {
+  PriorityReference varchar(80) [pk, ref: > Priority.Title]
+  Actor Actor
+  AssistanceType int [ref: > AssistanceType.id]
+  Alignemnt integer [default: 0, note: "min 0, max 5"]
+  Contribution integer [default: 0, note: "min 0, max 5"]
+  Capacity integer [default: 0, note: "min 0, max 5"]
+  Value  integer // calculated based on Alignemnt + Contribution + Capacity
+  ValueLabelId int [ref: > RatingLookup.id] // Lookup Band, Colour based on Risk within minValue:maxValue
+}
+
+Table AssistanceType {
+  id int [pk, increment]
+  Title AssistanceTypes
+  Level1 Level1Assistance
+  Level2 Level2Assistance
+  AssistanceShortCode varchar(20) [unique]
+}
+
+// Team Data Entry: Step 2
+Table TeamPriorities {
+  TeamName varchar(30)
+  PriorityTitle varchar(80)
+  Type PriorityType
+  Rank int [note: "Numerical rank or priority order for the team (e.g., 1 for highest priority)"]
+}
+
+// Team Data Entry: Step 3
+Table ResourceAllocation {
+  FirstName varchar(15)
+  LastName varchar(15)
+  TeamName varchar(30)
+  Type PriorityType
+  AllocationPercentage decimal(5,2) [note: "Percentage of time allocated, e.g., 50%, in 5% increments"]
+
+  indexes {
+    (FirstName, LastName, TeamName, Type) [pk]
+  }
+}
+
+Table RatingLookup {
+  id int [pk]
+  RatingType RatingType [not null] // Restricted to enum values 
+  minValue decimal [not null]
+  maxValue decimal [not null]
+  BandName varchar(100) [not null] // Fixed typo: vachar -> varchar
+  ColourCode varchar(20)
+}
+
+// Team Date Entry : Step 2
+Table TeamPriorityAllocation {
+  TeamName varchar(30)
+  PriorityTitle varchar(80)
+  Type PriorityType
+  AllocationPercentage decimal(5,2) [note: "Percentage of team effort allocated to priority, e.g., 25%"]
+
+  indexes {
+    (TeamName, PriorityTitle, Type) [pk]
+  }
+}
+
+// References for the new allocation table
+Ref: TeamPriorityAllocation.(TeamName, Type) > Teams.(TeamName, Type)
+Ref: TeamPriorityAllocation.(PriorityTitle, Type) > Priority.(Title, Type)
+
+Ref: TeamPriorities.(TeamName, Type) > Teams.(TeamName, Type)
+Ref: TeamPriorities.(PriorityTitle, Type) > Priority.(Title, Type)
+
+Ref: ResourceAllocation.(FirstName, LastName) > Resources.(FirstName, LastName)
+Ref: ResourceAllocation.(TeamName, Type) > Teams.(TeamName, Type)
+
+Enum PositionArea {
+  Operations
+  Technical
+  Legal
+}
+
+Enum PriorityType {
+  Tactical
+  Initiative
+  Assistance
+}
+
+Enum Actor {
+  Ottawa
+  Gatineau
+  Toronto
+}
+
+Enum TacticalTypes {
+	Profitability
+	Efficiency
+}
+
+Enum AssistanceTypes { // Fixed pluralization to match Assistance table reference
+  AssistType1
+  AssistType2
+  AssistType3
+  AssistType4
+}
+
+Enum InitiativeTypes { // Fixed name typo and duplicate values
+  Initiative1
+  Initiative2
+  Initiative3
+  Initiative4
+}
+
+// Team Data Entry : Step 1
+Enum TeamNames {
+	Team1
+	Team2
+	Team3
+	Team4
+	Team5
+	Team6
+}
+
+Enum Level1Initiative {
+	Analytical
+	Discovery
+	Partnership
+}
+
+Enum Level2Initiative {
+	DataExploitation
+	Technical 
+	Coordination 
+	More // about 20 Level2Initiatives
+}
+
+Enum ValueBand {
+  Minimal // 0..3.9
+  Limited // 3.99..5.9
+  Moderate // 5.99..7.9
+  Significant // 7.99..9.9
+  Exceptional // 10..12
+} // Added missing closing brace
+
+Enum ValueBandInitiative {
+  Minimal // 0..2
+  Limited // 3..6
+  Moderate // 7..10
+  Significant // 11..14
+  Exceptional // 15..16
+}
+
+Enum RatingType {
+  Intent
+  Capability
+  Likelihood
+  Consequence 
+  Risk
+  Dividend
+  Feasibility 
+  Cost
+  Value   
+}
+
+Enum YesNo {
+  Yes
+  No
+  Temp
+}
+
+
+// Safe to delete these two lines:
+//Ref: "Tactical"."RiskLabelId" ?<>? "Assistance"."ValueLabelId"
+//Ref: "Assistance"."PriorityReference" ?<? "Assistance"."AssistanceType"

@@ -1,0 +1,8 @@
+# Office lock/temp files
+~$*.xlsx
+~$*.xlsm
+~$*.docx
+
+# Python
+__pycache__/
+*.pyc
