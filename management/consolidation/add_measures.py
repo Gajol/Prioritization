@@ -87,6 +87,13 @@ def main(workbook_name):
         try:
             table = model.ModelTables(table_name)
             fmt = getattr(model, format_prop)
+            # A decimal format with no DecimalPlaces set defaults to 0 --
+            # e.g. 0.75 would display as "1" in any PivotTable that uses
+            # this measure (Grand Totals still sum correctly; only the
+            # per-cell display rounds). Not relevant for the whole-number
+            # format (Priority Rank).
+            if format_prop == "ModelFormatDecimalNumber":
+                fmt.DecimalPlaces = 2
             model.ModelMeasures.Add(name, table, formula, fmt)
             print(f"OK measure added: {name}")
         except pywintypes.com_error as e:

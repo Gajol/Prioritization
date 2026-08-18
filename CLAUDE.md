@@ -198,12 +198,16 @@ Write these as Markdown in `/docs`:
   hand-computed expected values exactly via CUBEVALUE, including the
   collision case never cross-contaminating.
   The 3 requested PivotTable views (Consolidated Priorities, Sum of FTEs
-  by Centre/Team, Sum of FTEs by Priority) are a documented **manual**
-  one-time step (Insert -> PivotTable -> "Use this workbook's Data
-  Model") — the PARKED PivotTable-via-COM failure below was retried
-  against this real, fully-wired workbook and failed identically, so
-  more effort wasn't sunk into it. "Rankings" doesn't need a PivotTable
-  at all — the Priorities_All (data) worksheet already is that view.
+  by Centre/Team, Sum of FTEs by Priority) are built by
+  `create_pivots.py` (2026-08-17) — the long-standing PARKED
+  PivotTable-via-COM failure below turned out to be a wrong enum
+  constant (SourceType=5 instead of the real xlExternal=2), not a
+  genuine COM limitation; see below, this resolves that PARKED item's
+  sub-blocker 2 for real. All 3 verified against the dev fixtures:
+  correct centre attribution, correct FTE sums, and the ECO/INF "Ops
+  Team" collision case confirmed never merging. "Rankings" doesn't need
+  a PivotTable at all — the Priorities_All (data) worksheet already is
+  that view.
 - `management/scripts/` and `templates/scripts/` — regenerate each
   workbook (`build_preparation.py` / `build_centre_template.py`) and wire
   it into its Data Model (`wire_data_model.py`, COM automation against a
@@ -228,38 +232,33 @@ Write these as Markdown in `/docs`:
   via-COM technique this would need, including the worksheet-Table
   intermediate step that makes the resulting table nameable/wireable —
   same recipe should transfer directly.
-- PARKED (2026-08-14): Resource x Team matrix PivotTable, sourced from
-  the Power Pivot Data Model, requested to visualize who's on what.
-  Blocked on two unresolved sub-problems before it can be finished:
-  1. Refresh UX — a Data Model PivotTable doesn't auto-sync with
-     worksheet edits, even same-workbook ones. Native (no-VBA) options
-     identified but not yet built/tested: `PivotCache.RefreshOnFileOpen`
-     (refresh when the file opens) and `PivotCache.RefreshPeriod`
-     (background auto-refresh every N minutes) — both are PivotCache
-     properties, not WorkbookConnection properties. A declarative Ribbon
-     XML button referencing the built-in `RefreshAll` command (no VBA)
-     was also proposed as a manual backstop.
-  2. Creating the PivotTable itself via COM automation
+- UNBLOCKED, not yet built (2026-08-17, see below for the long PARKED
+  history this closes): Resource x Team matrix PivotTable, sourced from
+  the Power Pivot Data Model, in templates/centre-template.xlsx. Both
+  sub-blockers that parked it are closed and the working recipe is
+  proven (management/consolidation/create_pivots.py) — what's left is a
+  short, mechanical application of that recipe to centre-template.xlsx
+  specifically (a new script, or a manual few-click pivot), not design
+  work.
+  1. Refresh UX — `PivotCache.RefreshOnFileOpen = True` is an ordinary
+     settable COM property once a real PivotCache exists (no VBA, no
+     Ribbon-XML backstop needed after all); `create_pivots.py` sets it
+     on every PivotTable it creates.
+  2. Creating the PivotTable itself via COM
      (`PivotCaches().Create(xlExternal, wb.Connections("ThisWorkbookDataModel"))`
-     then `.CreatePivotTable(...)`) fails with "Reference isn't valid" —
-     confirmed NOT a parameter mistake (tried explicit Version, refreshing
-     the connection first, activating the sheet, ActiveCell as
-     destination — same failure every time; even reading a plain property
-     like `CommandText` off the resulting PivotCache object fails the
-     same way, meaning the cache itself doesn't come out valid via this
-     API against our connection). Manual creation via the Excel UI
-     (Insert -> PivotTable -> "Use this workbook's Data Model") works
-     fine. Root cause not identified — possibly something about how
-     `ThisWorkbookDataModel` differs from a genuinely Power-Query-authored
-     model connection. RETRIED (2026-08-17) against the real, fully-wired
-     Consolidation workbook (real data, real measures, in case an empty/
-     template workbook was the issue) — identical failure. Treat this as
-     a genuinely broken COM path in this Excel version, not a parameter
-     problem; the manual-creation workaround is now the documented,
-     doubly-confirmed answer (see excel-file-design.md), not a fallback
-     to revisit. `PivotCache.RefreshOnFileOpen` doesn't need COM either —
-     it's a checkbox in PivotTable Options -> Data once a PivotTable
-     exists, closing sub-blocker 1 above the same way.
+     then `.CreatePivotTable(...)`) — this was believed to be a genuine,
+     unfixable COM/Excel-version limitation ("Reference isn't valid",
+     tried explicit Version, refreshing the connection first, activating
+     the sheet, different destinations, even retried once more against a
+     real fully-wired workbook — same failure every time). It was
+     actually a **parameter bug**: every attempt passed `SourceType=5`
+     for `xlExternal`, but the real enum value is **2** — `5` is
+     `xlPivotTableVersion15`, an unrelated constant. Found and fixed
+     while building the Consolidation workbook's 3 PivotTables (below);
+     with `SourceType=2` this is completely reliable, ordinary COM. No
+     more reason to prefer manual creation over scripting it — see
+     `management/consolidation/create_pivots.py` for the working pattern
+     to reuse here.
      Separately, RESOLVED (shipped in e36ca92): Excel Tables categorically
      cannot be resized while their sheet is protected — confirmed via two
      independent native mechanisms (typing into the row below, and

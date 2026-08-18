@@ -313,36 +313,53 @@ needs a real format object (`model.ModelFormatDecimalNumber`,
 way to spot-check any Data-Model measure by hand later without needing a
 PivotTable at all.
 
-### The 3 "basic views": manual PivotTable creation, not COM
+### The 3 "basic views": `create_pivots.py`
 
-This project already has one **unresolved** COM failure creating a PivotTable off
-a Data-Model connection (`PivotCaches().Create(xlExternal, wb.Connections("ThisWorkbookDataModel"))`
-→ "Reference isn't valid" — see the PARKED item in `CLAUDE.md`'s Status section).
-Retried once more here, against this real, fully-wired workbook, in case having
-actual data changed anything — same failure, same generic error. Not a
-parameter-tuning problem; treat it as a genuinely broken COM path in this Excel
-version and don't sink more effort into it.
+This project carried a long-standing **unresolved** COM failure creating a
+PivotTable off a Data-Model connection (`PivotCaches().Create(xlExternal,
+wb.Connections("ThisWorkbookDataModel"))` → "Reference isn't valid" — the
+PARKED item in `CLAUDE.md`'s Status section, re-tried and reconfirmed broken
+earlier in this same project). **It turned out to be a parameter bug, not a
+COM limitation**: every attempt, including the reconfirmation, passed
+`SourceType=5` for `xlExternal` — but the real enum value is **2**; `5` is
+`xlPivotTableVersion15`, an unrelated constant. With the correct value,
+`PivotCaches().Create(SourceType=2, SourceData=wb.Connections("ThisWorkbookDataModel"))`
+works every time, ordinary and reliable. `management/consolidation/create_pivots.py`
+scripts all 3 views:
 
-Since this is a **Management-only** workbook, a one-time manual setup step doesn't
-touch Centre Lead simplicity at all. Create these once via Insert → PivotTable →
-"Use this workbook's Data Model":
+1. **Consolidated Priorities** — Rows = `[Priority].[Title]`, Columns =
+   `[Centres].[Centre]`, Values = `[Measures].[__XL_Count Priorities_All]` (Excel's
+   auto-created implicit row-count measure).
+2. **Sum of FTEs by Centre/Team** — Rows = `[Centres].[Centre]` →
+   `[Teams_All].[Team Name]`, Values = `[Measures].[Total FTE]`.
+3. **Sum of FTEs by Priority** — Rows = `[Priority].[Title]`, Values =
+   `[Measures].[FTE Delivered to Priority]`. Kept separate from #2 — the two
+   measures are at different grains, and cramming both into one Pivot's Rows
+   produces misleading subtotals.
 
-1. **Consolidated Priorities** — Rows = `Priority[Title]`, Columns =
-   `Centres[Centre]`, Values = Count of `Priorities_All` rows (or filter to
-   `Resourced = "Yes"`).
-2. **Sum of FTEs by Centre/Team** — Rows = `Centres[Centre]` → `Teams_All[Team Name]`,
-   Values = `[Total FTE]`.
-3. **Sum of FTEs by Priority** — Rows = `Priority[Title]`, Values =
-   `[FTE Delivered to Priority]`. Kept as a separate PivotTable from #2 rather than
-   combined — the two measures are at different grains, and cramming both into one
-   Pivot's Rows produces misleading subtotals.
+All 3 verified against the dev fixtures: Consolidated Priorities shows all 5
+priorities under the right centre column (grand total 5); the two FTE pivots
+match the hand-computed `Total FTE`/`FTE Delivered to Priority` values exactly,
+including ECO's and INF's same-named "Ops Team" never merging (0.75 and 0.25
+stay separate rows, per the `TeamKey` design above).
+
+**Gotcha caught along the way**: a measure's `FormatInformation` (set in
+`add_measures.py`) directly controls how PivotTable cells *display* it, not just
+raw cell formatting. `model.ModelFormatDecimalNumber` with no `DecimalPlaces` set
+defaults to 0 — a PivotTable cell showing `Total FTE` for a 0.75 row displayed as
+`"1"` and a 0.25 row as `"0"` (Grand Totals still summed correctly underneath;
+only the per-cell *display* was rounding). Fixed by setting
+`fmt.DecimalPlaces = 2` before assigning the format — caught by comparing
+`Range.Text` (rounded) against `Range.Value` (exact) on the same cell, the same
+"don't trust displayed text alone" lesson noted above for formula errors.
 
 For "Rankings," just widen/sort the `Priorities_All (data)` worksheet itself — no
 PivotTable needed (see the `Priority Rank (Min)` note above).
 
-Once created, tick **PivotTable Options → Data → "Refresh data when opening the
-file"** on each (the UI equivalent of `PivotCache.RefreshOnFileOpen` — no COM
-needed) so they stay current without a manual refresh click every time.
+`create_pivots.py` sets `PivotCache.RefreshOnFileOpen = True` on all 3 as part of
+creation, so they stay current without a manual refresh click every time — no COM
+uncertainty here either, it's an ordinary settable property once a real
+`PivotCache` object exists.
 
 ### Dev fixtures
 
@@ -399,11 +416,8 @@ python templates/scripts/wire_data_model.py centre-template.xlsx
 python management/consolidation/wire_power_query.py consolidation.xlsx
 python management/consolidation/wire_data_model.py consolidation.xlsx
 python management/consolidation/add_measures.py consolidation.xlsx
+python management/consolidation/create_pivots.py consolidation.xlsx
 ```
-
-Then, manually, once: create the 3 PivotTables described in "Consolidation
-workbook" above via Insert → PivotTable → "Use this workbook's Data Model" — see
-that section for exact field-well contents and why this one step stays manual.
 
 **Formula verification, if you touch the formulas**: use
 `scripts/check_errors_excel.py` (with the file open in Excel) — it scans every cell
