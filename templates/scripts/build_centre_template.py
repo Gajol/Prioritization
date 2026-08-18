@@ -7,7 +7,13 @@ Assistance) and adds the Centre Lead's own input tables (Teams, Priorities
 & Ranking, Resource Allocation).
 
 Usage:
-    python build_centre_template.py <preparation.xlsx> <output-centre-template.xlsx>
+    python build_centre_template.py <preparation.xlsx> <output.xlsx> [centre-code]
+    python build_centre_template.py <preparation.xlsx> --all <output-dir>
+
+The optional centre-code (must match a CentreCode in preparation.xlsx's Centres
+table) stamps and locks the Instructions sheet's Centre Name/Code cells at
+generation time instead of leaving them as editable placeholders. --all
+generates all six centre files in one run, named Centre-<CentreCode>.xlsx.
 
 After running, verify formulas with ../../scripts/recalc_windows.py — but
 point it at a COPY of the output, never the file itself. LibreOffice's
@@ -23,6 +29,7 @@ file open in Excel) to wire the tables into the Power Pivot Data Model —
 that resave is safe, since it's done by real Excel.
 """
 import sys
+from pathlib import Path
 
 import openpyxl
 from openpyxl.formatting.rule import FormulaRule
@@ -116,8 +123,19 @@ def write_reference_table(ws, name, top_row, headers, rows, col_widths=None, sta
     return last_row
 
 
-def main(prep_path, out_path):
+def main(prep_path, out_path, centre_name=None, centre_code=None):
     src = openpyxl.load_workbook(prep_path, data_only=True)
+
+    if centre_code is not None:
+        _, centres_rows = read_table(src, "Centres")
+        by_code = {row[2]: row[1] for row in centres_rows}  # CentreCode -> Centre
+        if centre_code not in by_code:
+            raise ValueError(
+                f"Unknown centre code {centre_code!r}; must be one of {sorted(by_code)}"
+            )
+        if centre_name is None:
+            centre_name = by_code[centre_code]
+
     wb = openpyxl.Workbook()
 
     # ================================================================= Instructions
@@ -144,15 +162,14 @@ def main(prep_path, out_path):
          "fill in.", None, False),
         ("", None, False),
         ("How to use this workbook", 12, True),
-        ("1. Centre info — fill in the two yellow cells below.", None, False),
-        ("2. 'Step 1 - Teams' — list every team this centre has, whether it "
+        ("1. 'Step 1 - Teams' — list every team this centre has, whether it "
          "has dedicated resources, and which Priority Type it works on.", None, False),
-        ("3. 'Step 2 - Priorities & Ranking' — for each team, pick priorities "
+        ("2. 'Step 2 - Priorities & Ranking' — for each team, pick priorities "
          "from Management's master list (only priorities matching the "
          "team's Priority Type will be offered), rank them, mark whether "
          "the team is actually resourcing it, and what share of the team's "
          "effort it gets.", None, False),
-        ("4. 'Step 3 - Resource Allocation' — pick each person from "
+        ("3. 'Step 3 - Resource Allocation' — pick each person from "
          "Management's Resources list, which team they're on, and what "
          "share of their time goes to that team. Their position fills in "
          "automatically.", None, False),
@@ -188,7 +205,8 @@ def main(prep_path, out_path):
          "many rows at once can bypass them — glance at the check columns "
          "before sending this file back.", None, False),
         ("", None, False),
-        ("Centre Info", 12, True),
+        ("Centre Info (auto-filled by Management when this workbook was "
+         "generated — not something you need to enter)", 12, True),
     ]
     r = 1
     for text, size, bold in text_blocks:
@@ -198,13 +216,19 @@ def main(prep_path, out_path):
             c.alignment = Alignment(wrap_text=True)
             ws.row_dimensions[r].height = 30
         r += 1
+    centre_name_row = r
     ws.cell(row=r, column=1, value="Centre Name:").font = Font(name=FONT, bold=True)
-    ws.cell(row=r, column=2, value="Example Centre").fill = PatternFill("solid", fgColor=YELLOW)
-    ws.cell(row=r, column=2).font = Font(name=FONT)
+    style_computed(ws.cell(row=r, column=2, value=centre_name or "Example Centre"))
     r += 1
+    centre_code_row = r
     ws.cell(row=r, column=1, value="Centre Code:").font = Font(name=FONT, bold=True)
-    ws.cell(row=r, column=2, value="EX").fill = PatternFill("solid", fgColor=YELLOW)
-    ws.cell(row=r, column=2).font = Font(name=FONT)
+    style_computed(ws.cell(row=r, column=2, value=centre_code or "EX"))
+
+    wb.defined_names["CentreName"] = DefinedName(
+        "CentreName", attr_text=f"Instructions!$B${centre_name_row}")
+    wb.defined_names["CentreCode"] = DefinedName(
+        "CentreCode", attr_text=f"Instructions!$B${centre_code_row}")
+    ws.protection.sheet = True
 
     # ================================================================= Reference sheets (read-only)
     def copy_ref(sheet_name, col_widths, protect=True):
@@ -558,4 +582,21 @@ def main(prep_path, out_path):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    if len(sys.argv) < 3:
+        raise SystemExit(
+            "Usage:\n"
+            "  python build_centre_template.py <preparation.xlsx> <output.xlsx> [centre-code]\n"
+            "  python build_centre_template.py <preparation.xlsx> --all <output-dir>"
+        )
+    prep_arg = sys.argv[1]
+    if sys.argv[2] == "--all":
+        if len(sys.argv) != 4:
+            raise SystemExit("Usage: python build_centre_template.py <preparation.xlsx> --all <output-dir>")
+        out_dir = Path(sys.argv[3])
+        out_dir.mkdir(parents=True, exist_ok=True)
+        centres_src = openpyxl.load_workbook(prep_arg, data_only=True)
+        _, all_centres = read_table(centres_src, "Centres")
+        for _id, c_name, c_code in all_centres:
+            main(prep_arg, str(out_dir / f"Centre-{c_code}.xlsx"), centre_name=c_name, centre_code=c_code)
+    else:
+        main(prep_arg, sys.argv[2], centre_code=sys.argv[3] if len(sys.argv) > 3 else None)

@@ -94,6 +94,8 @@ The workflow for a Centre Lead is:
    to Power BI or Tableau, where visualization matters more.
 5. I believe this should be a Data Model in Excel so Power Pivot and Measures are possible.  The Data Model should use the relationships as shown in the DBML file.
 6. For Conditional Format ensure the formulas are as clean as possible for maintainability and reading.  For example, apply to a column as opposed to a range if that is easier. 
+7. Simple Excel skills for data entry.  The simpler that better as the Centre Leads are not IT experts.
+8. Ability to work with these Excel files post-Claude.  The data-model, formulas, and everything should be easy to maintain, and update while disconnected from Claude and the internet. 
 
 ## Approach
 
@@ -123,6 +125,7 @@ The workflow for a Centre Lead is:
 Write these as Markdown in `/docs`:
 
 1. How the Excel files are designed..  Include tools used (for example Python to build data model and links for online help)
+   1. Include ERD diagrams based off the priorities.dbml file.  Ensure these are sized for easy reading in Letter mode.  Separating into more than one diagram maybe desirable. 
 2. A User Guide for Centre Leads.
 
 ## References
@@ -143,10 +146,23 @@ Write these as Markdown in `/docs`:
   tables from preparation.xlsx and shares its data model — same table
   names/columns. Wired into its own Power Pivot Data Model (15/17
   relationships live; the 2 involving Teams can't be created until a
-  Centre Lead fills in real team data — Teams is currently a blank
-  template, and Power Pivot rejects a relationship whose "one" side is
-  mostly blank cells. Re-run wire_data_model.py, which is idempotent,
-  once real data exists.)
+  Centre Lead fills in real team data. Confirmed by re-running
+  wire_data_model.py against the current template (2026-08-17): Power
+  Pivot rejects the relationship even with Teams shrunk to a single
+  blank data row — the real rule is that the "one" side's key column
+  can't contain *any* blank, not just duplicate blanks as originally
+  assumed. So there's no template-side trick that unblocks this before
+  real data exists; re-run wire_data_model.py, which is idempotent,
+  once a Centre Lead has filled in Step 1 - Teams. CONFIRMED WORKING
+  (2026-08-17) against 3 filled dev fixtures
+  (management/scripts/dev_fixtures/make_test_centres.py) — all three
+  wired to 17/17 relationships once real, non-blank Team Name data
+  existed. Centre Name/Code on the Instructions sheet are now stamped
+  and locked at generation time (build_centre_template.py's `main()`
+  takes an optional centre_name/centre_code, validated against
+  preparation.xlsx's Centres table; `--all` generates all six in one
+  run) instead of an editable "Example Centre"/"EX" placeholder with
+  nothing keeping it in sync with the filename.)
   - Row 2 is no longer prefilled with example data (was confusing on a
     recurring-use workbook); worked example moved into the Instructions
     tab as text.
@@ -160,6 +176,34 @@ Write these as Markdown in `/docs`:
     building this (apostrophe in a column name silently breaking
     `Table[Column]`; structured refs not working inside Data
     Validation custom formulas).
+- `management/consolidation/consolidation.xlsx` — Management's Consolidation workbook:
+  combines the six returned centre files into consolidated views (which
+  priorities each centre works, rankings, sum of FTEs). Built by
+  `management/consolidation/build_consolidation.py` (shell + static
+  reference tables), `wire_power_query.py` (authors the 3 Folder-connector
+  Power Query combine queries — Teams_All/Priorities_All/
+  ResourceAllocation_All — and loads each into the Data Model), then
+  `wire_data_model.py` (5/5 relationships, via a composite TeamKey =
+  CentreCode | Team Name, since Team Name alone collides across centres)
+  and `add_measures.py` (3 DAX measures: Total FTE, FTE Delivered to
+  Priority — a two-hop calculation, see excel-file-design.md — and
+  Priority Rank (Min)). All of this turned out fully scriptable via COM,
+  including Power Query authoring and DAX measures, neither of which had
+  any prior precedent in this codebase — see excel-file-design.md's
+  "Consolidation workbook" section for the exact recipe and the dead ends
+  it avoids. Verified end-to-end (2026-08-17) against 3 hand-checkable dev
+  fixtures (management/scripts/dev_fixtures/make_test_centres.py,
+  deliberately planting a same-named "Ops Team" in two different centres
+  to exercise the TeamKey collision case): all 3 measures matched
+  hand-computed expected values exactly via CUBEVALUE, including the
+  collision case never cross-contaminating.
+  The 3 requested PivotTable views (Consolidated Priorities, Sum of FTEs
+  by Centre/Team, Sum of FTEs by Priority) are a documented **manual**
+  one-time step (Insert -> PivotTable -> "Use this workbook's Data
+  Model") — the PARKED PivotTable-via-COM failure below was retried
+  against this real, fully-wired workbook and failed identically, so
+  more effort wasn't sunk into it. "Rankings" doesn't need a PivotTable
+  at all — the Priorities_All (data) worksheet already is that view.
 - `management/scripts/` and `templates/scripts/` — regenerate each
   workbook (`build_preparation.py` / `build_centre_template.py`) and wire
   it into its Data Model (`wire_data_model.py`, COM automation against a
@@ -179,6 +223,11 @@ Write these as Markdown in `/docs`:
   CLAUDE.md's Process section describes a live data-connection refresh
   from preparation.xlsx when Management clones a centre file; what's
   actually built is a static snapshot copy baked in at generation time.
+  Now a lower-risk follow-on than it looked: the Consolidation workbook's
+  Power Query combine (wire_power_query.py) proved out the M-authoring-
+  via-COM technique this would need, including the worksheet-Table
+  intermediate step that makes the resulting table nameable/wireable —
+  same recipe should transfer directly.
 - PARKED (2026-08-14): Resource x Team matrix PivotTable, sourced from
   the Power Pivot Data Model, requested to visualize who's on what.
   Blocked on two unresolved sub-problems before it can be finished:
@@ -202,17 +251,27 @@ Write these as Markdown in `/docs`:
      (Insert -> PivotTable -> "Use this workbook's Data Model") works
      fine. Root cause not identified — possibly something about how
      `ThisWorkbookDataModel` differs from a genuinely Power-Query-authored
-     model connection.
-  Separately, discovered and PARKED a real conflict while trying to keep
-  Step 1 - Teams starting from a single blank row (to unblock the
-  Teams-side Data Model relationships, which need a non-blank "one"
-  side): Excel Tables categorically cannot be resized while their sheet
-  is protected — confirmed via two independent native mechanisms
-  (typing into the row below, and `ListRows.Add()` / Insert Table Row),
-  the latter failing identically even with `AllowInsertingRows=True`
-  explicitly granted on `Worksheet.Protect`. So "protect the computed
-  columns" and "let users add team rows without asking Management" are
-  mutually exclusive for a Table on a protected sheet, no VBA. Proposed
-  but not decided: leave Step 1 specifically unprotected (Step 2/3 don't
-  need to grow, since they already have 200 pre-built rows, so keeping
-  those protected is unaffected by this). Revisit before shipping.
+     model connection. RETRIED (2026-08-17) against the real, fully-wired
+     Consolidation workbook (real data, real measures, in case an empty/
+     template workbook was the issue) — identical failure. Treat this as
+     a genuinely broken COM path in this Excel version, not a parameter
+     problem; the manual-creation workaround is now the documented,
+     doubly-confirmed answer (see excel-file-design.md), not a fallback
+     to revisit. `PivotCache.RefreshOnFileOpen` doesn't need COM either —
+     it's a checkbox in PivotTable Options -> Data once a PivotTable
+     exists, closing sub-blocker 1 above the same way.
+     Separately, RESOLVED (shipped in e36ca92): Excel Tables categorically
+     cannot be resized while their sheet is protected — confirmed via two
+     independent native mechanisms (typing into the row below, and
+     `ListRows.Add()` / Insert Table Row), the latter failing identically
+     even with `AllowInsertingRows=True` explicitly granted on
+     `Worksheet.Protect`. Fix: Step 1 - Teams' official Table range is a
+     single data row, backed by a 14-row buffer (rows 3-16, teams #2-15)
+     that's pre-styled/validated/unlocked but sits outside the Table —
+     typing into it works under protection, and the Table auto-extends to
+     absorb the row. Sheet protection stays on throughout, so no need to
+     leave Step 1 unprotected. This fix was originally motivated by the
+     Teams relationship problem above but doesn't solve it (see above —
+     the real blocker is any blank on the one-side key, not duplicate
+     blanks); it's kept anyway since it's a real, independently-useful fix
+     for the protection/resize conflict.

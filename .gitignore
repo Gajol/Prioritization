@@ -6,3 +6,6 @@
 # Python
 __pycache__/
 *.pyc
+
+# Throwaway dev/test fixtures (regenerate via make_test_centres.py)
+management/scripts/dev_fixtures/output/

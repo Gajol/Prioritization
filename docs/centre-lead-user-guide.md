@@ -14,10 +14,10 @@ Excel.
 
 ## Before you start
 
-Open the **Instructions** tab and fill in the two yellow cells:
-
-- **Centre Name**
-- **Centre Code**
+Open the **Instructions** tab. Your centre's name and code are already filled
+in (grey, locked) at the bottom — Management stamps these in when they
+generate your copy of the workbook, so there's nothing for you to enter
+there. If they look wrong, tell Management before you start entering data.
 
 ## The sheets
 
@@ -102,5 +102,7 @@ your entries before sending the file back:
 ## Sending it back
 
 Save the file and return it the way Management asked (typically via SharePoint).
-Don't rename the file unless asked to — the filename is how Management tells your
-centre's data apart from the other five.
+Don't rename the file unless asked to — the filename and the locked Centre
+Name/Code on the Instructions tab are set together when Management generates
+your copy, and consolidation across all six centres relies on them staying in
+sync.
