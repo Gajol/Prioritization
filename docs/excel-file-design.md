@@ -141,6 +141,67 @@ see `scripts/check_errors_excel.py`'s docstring. Read `Range.Text` (always a
 string) or `Range.Formula` (to see what the reference actually resolved to)
 instead.
 
+## Conditional formatting fills — a silent, project-wide bug (fixed 2026-08-17)
+
+**Every conditional-format fill colour in this project had never actually been
+rendering** — the Teams %/Person % red-amber-green columns, the Tactical/
+Initiative/Assistance risk/value band colours, all of it. Discovered while adding
+the new Value/Risk column below: the rules were present, evaluated correctly
+(confirmed via `Application.Evaluate`), and `check_errors_excel.py` reported zero
+errors — none of that catches this, because it isn't a formula error. The cell
+just silently kept its plain base fill, with no error, no repair-log entry,
+nothing — exactly the class of gotcha this file keeps warning about, just never
+caught until now.
+
+**Root cause**: `openpyxl.styles.PatternFill("solid", fgColor=colour)` is correct
+for an ordinary cell's own `.fill`, but Excel's differential-formatting (`dxf`)
+XML — the format a `FormulaRule`/`CellIsRule` conditional-format rule uses — reads
+the **background** colour for a solid pattern, not `fgColor`. With only `fgColor`
+set, `bgColor` defaults to none, so Excel paints nothing. Confirmed by isolating
+it two ways: (1) `Application.Evaluate` showed the rule's formula was `True` for
+cells that displayed no colour; (2) setting a `FormatCondition`'s `Interior.Color`
+directly via COM on an unmodified rule immediately made the fill appear, proving
+the rule itself was fine and only the openpyxl-written fill was the problem.
+**Fix**: always pass both — `PatternFill("solid", fgColor=colour, bgColor=colour)`
+— on any fill used inside a `FormulaRule`/`CellIsRule`. Plain (non-conditional)
+`.fill = PatternFill(...)` cell styling is unaffected; only fixed the 7 call
+sites that feed a conditional-format rule, in both `build_centre_template.py` and
+`build_preparation.py`.
+
+**How this was actually caught**: not by opening the file and looking — `.Interior.Color`
+and even `DisplayFormat.Interior.Color` read via COM were themselves unreliable
+for checking this from a script (both under- and over-reported colours in
+different ways during debugging). What worked was
+`Worksheet.Range(...).ExportAsFixedFormat(0, path.pdf)` — Excel exporting its own
+rendered output to a real PDF, then reading that PDF directly. That's the reliable
+way to verify anything about how a sheet actually *looks*, as opposed to what its
+object model *reports*; a live screen capture was tried first and rejected
+outright — it grabbed whatever window happened to have focus, not necessarily
+Excel, which is a real risk on a machine with other things open. `ExportAsFixedFormat`
+has no such risk: it renders exactly the range asked for, from the Excel object
+itself, nothing else on screen.
+
+## Value/Risk band during ranking (Step 2)
+
+`templates/centre-template.xlsx`'s "Step 2 - Priorities & Ranking" has a
+`Value/Risk (auto)` column: given the row's Priority Title and Type, it looks up
+Management's own Risk (Tactical) or Value (Initiative/Assistance) band label from
+the already-embedded `TacticalScores`/`InitiativeScores`/`AssistanceScores`
+tables (`INDEX(...,MATCH(...))`, same shape as the existing `Type (auto)`
+column), colour-coded to match. The point is to surface it **at ranking time**,
+not just after the fact — a Centre Lead ranking a "Minimal"-risk item #1 should
+see that immediately.
+
+**The Risk/Value band-name collision**: Risk bands and Value bands share the
+band name "Minimal" with *opposite* meaning — Risk Minimal is green (good, low
+risk), Value Minimal is red (bad, low value). A single shared Label column can't
+be conditionally formatted by text-match alone without misfiring on that overlap.
+Fixed by qualifying every rule on Type as well as Label —
+`AND($C2="Tactical",$G2="Minimal")` vs. `AND($C2<>"Tactical",$C2<>"",$G2="Minimal")`
+— 10 rules total (5 Risk bands + 5 Value bands), reusing the same
+`RISK_BANDS`/`VALUE_BANDS` colour constants already defined for the embedded
+reference sheets.
+
 ## Process gap: static snapshot vs. live refresh
 
 CLAUDE.md's Process section describes Management "ensuring the data is refreshed

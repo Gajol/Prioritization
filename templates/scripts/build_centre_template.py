@@ -315,7 +315,7 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
             ws.conditional_formatting.add(
                 f"{label_col_letter}2:{label_col_letter}{last_row}",
                 FormulaRule(formula=[f'{label_col_letter}2="{band_name}"'],
-                            fill=PatternFill("solid", fgColor=colour))
+                            fill=PatternFill("solid", fgColor=colour, bgColor=colour))
             )
 
     # ================================================================= Lookups (small enums, editable-free)
@@ -436,7 +436,7 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     ):
         ws.conditional_formatting.add(
             f"D2:D{teams_buffer_row}",
-            FormulaRule(formula=[op], fill=PatternFill("solid", fgColor=colour),
+            FormulaRule(formula=[op], fill=PatternFill("solid", fgColor=colour, bgColor=colour),
                         font=Font(name=FONT, color=text_colour))
         )
     ws.freeze_panes = "A2"
@@ -445,8 +445,8 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     ws = wb.create_sheet("Step 2 - Priorities & Ranking")
     ws.sheet_view.showGridLines = False
     headers = ["Team Name", "Priority Title", "Type (auto)", "Rank", "Resourced",
-               "Allocation % of Team Effort"]
-    widths = [22, 42, 16, 10, 12, 22]
+               "Allocation % of Team Effort", "Value/Risk (auto)"]
+    widths = [22, 42, 16, 10, 12, 22, 16]
     for i, (h, w) in enumerate(zip(headers, widths), start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
         style_header(ws.cell(row=1, column=i, value=h))
@@ -461,8 +461,21 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
         style_body(ws.cell(row=r, column=5), editable=True)
         style_body(ws.cell(row=r, column=6), editable=True)
         ws.cell(row=r, column=6).number_format = "0%"
+        # Value/Risk band for the selected priority — looked up from
+        # whichever of the three embedded scoring tables matches this row's
+        # own Type (auto), so Centre Leads see it right where they're
+        # deciding how to rank, not just after the fact.
+        c7 = ws.cell(row=r, column=7)
+        style_computed(c7)
+        c7.value = (
+            f'=IF($B{r}="","",'
+            f'IF($C{r}="Tactical",IFERROR(INDEX(TacticalScores[RiskLabel],MATCH($B{r},TacticalScores[PriorityReference],0)),"unknown"),'
+            f'IF($C{r}="Initiative",IFERROR(INDEX(InitiativeScores[ValueLabel],MATCH($B{r},InitiativeScores[PriorityReference],0)),"unknown"),'
+            f'IF($C{r}="Assistance",IFERROR(INDEX(AssistanceScores[ValueLabel],MATCH($B{r},AssistanceScores[PriorityReference],0)),"unknown"),'
+            f'""))))'
+        )
 
-    tab = Table(displayName="Priorities", ref=f"A1:F{last_row}")
+    tab = Table(displayName="Priorities", ref=f"A1:G{last_row}")
     tab.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
     ws.add_table(tab)
 
@@ -508,6 +521,25 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     dv_alloc2.errorTitle = "Invalid entry"
     ws.add_data_validation(dv_alloc2)
     dv_alloc2.add(f"F2:F{last_row}")
+
+    # Risk bands and Value bands share band names ("Minimal") with opposite
+    # meaning — Risk Minimal is green (good, low risk), Value Minimal is red
+    # (bad, low value) — so each rule must check Type (column C), not just
+    # match the Label text in column G, or a Tactical and an
+    # Initiative/Assistance row with the same band name would get each
+    # other's colour.
+    for band_name, colour in RISK_BANDS:
+        ws.conditional_formatting.add(
+            f"G2:G{last_row}",
+            FormulaRule(formula=[f'AND($C2="Tactical",$G2="{band_name}")'],
+                        fill=PatternFill("solid", fgColor=colour, bgColor=colour))
+        )
+    for band_name, colour in VALUE_BANDS:
+        ws.conditional_formatting.add(
+            f"G2:G{last_row}",
+            FormulaRule(formula=[f'AND($C2<>"Tactical",$C2<>"",$G2="{band_name}")'],
+                        fill=PatternFill("solid", fgColor=colour, bgColor=colour))
+        )
 
     ws.protection.sheet = True
     ws.freeze_panes = "A2"
@@ -570,7 +602,7 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     ):
         ws.conditional_formatting.add(
             f"E2:E{last_row}",
-            FormulaRule(formula=[op], fill=PatternFill("solid", fgColor=colour),
+            FormulaRule(formula=[op], fill=PatternFill("solid", fgColor=colour, bgColor=colour),
                         font=Font(name=FONT, color=text_colour))
         )
     ws.freeze_panes = "A2"

@@ -56,6 +56,7 @@ For each team, list the priorities it's working on:
 | Rank | A positive whole number, unique within the team (1 = highest priority) |
 | Resourced | Yes / No — is the team actually putting resources against this? |
 | Allocation % of Team Effort | What share of the team's total effort goes to this priority |
+| Value/Risk (auto) | Fills in automatically once you pick a Priority Title — Management's own Risk (Tactical) or Value (Initiative/Assistance) rating for it, colour-coded. Use it while you rank: a #1 you've ranked "Minimal" is worth a second look. |
 
 A team's Allocation % across all its priorities can't exceed 100% — Excel will
 refuse an entry that would push it over.
@@ -82,6 +83,11 @@ your entries before sending the file back:
 - **Amber** — under 100%. Not necessarily wrong (a team might not be fully
   allocated yet), but worth a second look.
 - **Red** — over 100%. Something's wrong; fix it before sending the file back.
+
+The colour on **Value/Risk (auto)** (Step 2) means something different — it's
+Management's Risk/Value band for that priority (green/light-green = low risk or
+high value, red = high risk or low value, depending on the priority's Type), not
+a 100%-total check. Use it to sanity-check your ranking, not your allocation.
 
 ## Troubleshooting
 

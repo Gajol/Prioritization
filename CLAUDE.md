@@ -140,6 +140,18 @@ Write these as Markdown in `/docs`:
   50 Priorities with full Tactical/Initiative/Assistance scoring), wired
   into a real Power Pivot Data Model with relationships matching
   data-model/priorities.dbml's `Ref:` lines.
+- FIXED (2026-08-17), project-wide, previously silent: every conditional-
+  format fill colour in this project (Teams %/Person % red-amber-green,
+  Tactical/Initiative/Assistance risk/value band colours) had never
+  actually rendered — `PatternFill("solid", fgColor=colour)` alone doesn't
+  work in a `dxf` (conditional format) context, only `fgColor` +
+  `bgColor` together does. No error anywhere; caught only by exporting a
+  sheet to PDF via `ExportAsFixedFormat` and looking at the real render
+  (COM's `Interior.Color`/`DisplayFormat.Interior.Color` were themselves
+  unreliable for checking this). Fixed at all 7 call sites in
+  build_centre_template.py/build_preparation.py; both preparation.xlsx and
+  centre-template.xlsx regenerated and re-verified. See
+  excel-file-design.md for the full writeup.
 - `templates/centre-template.xlsx` — Centre Lead data-entry workbook
   (Teams, Priorities & Ranking, Resource Allocation), native Excel
   validation only, no VBA. Embeds read-only copies of all 11 reference
@@ -166,6 +178,16 @@ Write these as Markdown in `/docs`:
   - Row 2 is no longer prefilled with example data (was confusing on a
     recurring-use workbook); worked example moved into the Instructions
     tab as text.
+  - NEW (2026-08-17): "Step 2 - Priorities & Ranking" has a `Value/Risk
+    (auto)` column — Management's Risk (Tactical) or Value (Initiative/
+    Assistance) band for the row's Priority, looked up from the already-
+    embedded scoring tables and colour-coded, shown at ranking time so a
+    Centre Lead can see e.g. a "Minimal"-risk item they've ranked #1.
+    Handles the Risk/Value "Minimal" band-name collision (opposite
+    colour meaning) via Type-qualified conditional-format rules — see
+    excel-file-design.md. Verified against the dev fixtures via PDF
+    export (Low/Minimal/Moderate render with the correct distinct
+    colours).
   - Steps 1–3 now have sheet protection: computed columns locked,
     input columns unlocked.
   - Both Allocation % columns are dropdowns constrained to 5% steps

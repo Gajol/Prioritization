@@ -528,7 +528,7 @@ for band_name, colour in RISK_BANDS:
     ws_tac.conditional_formatting.add(
         f"K2:K{last_tactical}",
         CellIsRule(operator="equal", formula=[f'"{band_name}"'],
-                   fill=PatternFill("solid", fgColor=colour))
+                   fill=PatternFill("solid", fgColor=colour, bgColor=colour))
     )
 
 for sheet_name, last_row in (("Initiative", last_initiative), ("Assistance", last_assistance)):
@@ -537,7 +537,7 @@ for sheet_name, last_row in (("Initiative", last_initiative), ("Assistance", las
         ws_v.conditional_formatting.add(
             f"J2:J{last_row}",
             CellIsRule(operator="equal", formula=[f'"{band_name}"'],
-                       fill=PatternFill("solid", fgColor=colour))
+                       fill=PatternFill("solid", fgColor=colour, bgColor=colour))
         )
 
 wb.move_sheet("Instructions", offset=-10)
