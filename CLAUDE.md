@@ -56,7 +56,7 @@ sync with whatever the Excel workbooks actually implement.
    2. Management populates Resources, their Position is known/populated.
       1. The Position table is 
    3. Management populates other tables such as Centres, 
-   4. RatingLookup is also populated so all scoring can be associated a label like "Very High", etc. (A VLOOKUP in excel of Cateogry, MIN:MAX)
+   4. RatingLookup is also populated so all scoring can be associated a label like "Very High", etc. (A VLOOKUP in excel of Category, MIN:MAX)
 2. Send Data Collection Excel Files Phase:  Management creates & populates an Excel for each Centre Lead
    1. Management creates a Excel for each Centre (consistent filenaming convention).  This file is cloned from the "templates".
    2. Management sets the Centre name in each file to be the Centre-name for the file (or ideally this is auto-done based on the filename or automation)
@@ -254,6 +254,17 @@ Write these as Markdown in `/docs`:
   via-COM technique this would need, including the worksheet-Table
   intermediate step that makes the resulting table nameable/wireable —
   same recipe should transfer directly.
+- RESOLVED (2026-09-01): the RatingLookup-driven band formulas
+  (`band_formulas()` in build_preparation.py) used INDEX/MATCH rather than
+  VLOOKUP, which cut against maintainability by an intermediate Excel
+  user. Fixed by reordering RatingLookup to `minValue, id, RatingType,
+  maxValue, BandName, ColourCode` (Min now precedes Id) and switching all
+  three lookups to VLOOKUP against two named table ranges per rating type.
+  Both preparation.xlsx and centre-template.xlsx regenerated, recalculated
+  in Excel with zero formula errors, and rewired (13/13 and 15/17
+  relationships respectively — unchanged from before, since the Data
+  Model wiring addresses RatingLookup.id by name, not position). See
+  excel-file-design.md.
 - UNBLOCKED, not yet built (2026-08-17, see below for the long PARKED
   history this closes): Resource x Team matrix PivotTable, sourced from
   the Power Pivot Data Model, in templates/centre-template.xlsx. Both

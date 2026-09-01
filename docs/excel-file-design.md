@@ -202,6 +202,41 @@ Fixed by qualifying every rule on Type as well as Label —
 `RISK_BANDS`/`VALUE_BANDS` colour constants already defined for the embedded
 reference sheets.
 
+## Resolved: INDEX/MATCH readability vs. intermediate Excel users
+
+CLAUDE.md's Preparation-phase description of RatingLookup calls this "A
+VLOOKUP in excel of Category, MIN:MAX", but `band_formulas()` in
+`management/scripts/build_preparation.py` — which drives every
+Tactical/Initiative/Assistance score's band label/colour, and by extension
+the centre template's `Type (auto)` and `Value/Risk (auto)` columns above —
+originally used `INDEX(..., MATCH(...))` throughout, not VLOOKUP.
+
+The band-id lookup couldn't be VLOOKUP as `RatingLookup` was originally laid
+out (`id, RatingType, minValue, maxValue, BandName, ColourCode`): it does an
+approximate match on `minValue` and returns `id`, which sat to its *left* —
+VLOOKUP only returns columns to the right of its search column. The other
+two lookups (`BandName`/`ColourCode` by exact match on `id`) were already to
+the right of `id` and were only INDEX/MATCH for consistency with the one
+that had to be.
+
+**Resolved (2026-09-01), option b**: `RatingLookup` is reordered to
+`minValue, id, RatingType, maxValue, BandName, ColourCode` — `minValue`
+now precedes `id`, so the band-id lookup is a plain
+`VLOOKUP(rawScore, {Type}_MinTable, 2, TRUE)`, and the `BandName`/`ColourCode`
+lookups are `VLOOKUP(id, {Type}_IdTable, ..., FALSE)` against a second
+named range starting at `id`. Two 2-/5-column named table ranges per rating
+type (`{Type}_MinTable`, `{Type}_IdTable`) replace the four single-column
+arrays the INDEX/MATCH version used, since VLOOKUP needs a contiguous range
+rather than an array. The Power Pivot relationships that reference
+`RatingLookup.id` (in both `wire_data_model.py` scripts) address the column
+by name, not position, so the reorder didn't require any change there —
+confirmed by re-running both: 13/13 relationships on
+`management/preparation.xlsx`, 15/17 on `templates/centre-template.xlsx`
+(same pre-existing Teams-blank limitation as before, unrelated to this
+change). Verified via a full Excel recalculation with no formula errors in
+any Tactical/Initiative/Assistance band column, and spot-checked computed
+values against hand-expected bands.
+
 ## Process gap: static snapshot vs. live refresh
 
 CLAUDE.md's Process section describes Management "ensuring the data is refreshed

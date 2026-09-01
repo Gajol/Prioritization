@@ -607,7 +607,19 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
         )
     ws.freeze_panes = "A2"
 
-    wb.move_sheet("Instructions", offset=-20)
+    # Tab order follows the data model / left-to-right reading order: each
+    # type-specific lookup sits immediately before the scoring table that
+    # consumes it (ProblemSet->Tactical, InitiativeType->Initiative,
+    # AssistanceType->Assistance); RatingLookup goes last since all three
+    # scoring tables share it rather than it belonging to one. The Step
+    # 1-3 entry sheets stay last, in the Centre Lead's actual workflow
+    # order.
+    SHEET_ORDER = ["Instructions", "Centres", "Position", "Resources", "Priority",
+                   "ProblemSet", "Tactical", "InitiativeType", "Initiative",
+                   "AssistanceType", "Assistance", "RatingLookup", "Lookups",
+                   "Step 1 - Teams", "Step 2 - Priorities & Ranking",
+                   "Step 3 - Resource Allocation"]
+    wb._sheets = [wb[name] for name in SHEET_ORDER]
     wb.active = 0
     wb.save(out_path)
     print("saved", out_path)

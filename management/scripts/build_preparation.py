@@ -242,42 +242,43 @@ ws["A1"].font = Font(name=FONT, italic=True)
 ws.merge_cells("A1:F1")
 
 rating_rows = [
-    # id, RatingType, minValue, maxValue, BandName, ColourCode
-    (1, "Likelihood", 0, 5, "Very Low", "FFDCE6F1"),
-    (2, "Likelihood", 5, 10, "Low", "FFB8CCE4"),
-    (3, "Likelihood", 10, 15, "Moderate", "FF8DB4E2"),
-    (4, "Likelihood", 15, 20, "High", "FF538DD5"),
-    (5, "Likelihood", 20, 25, "Very High", "FF1F497D"),
-    (6, "Risk", 0, 5, "Minimal", "FF63BE7B"),
-    (7, "Risk", 5, 10, "Low", "FFA9D18E"),
-    (8, "Risk", 10, 15, "Moderate", "FFFFEB84"),
-    (9, "Risk", 15, 20, "High", "FFF4B183"),
-    (10, "Risk", 20, 25, "Very High", "FFE06666"),
-    (11, "Value", 0, 3, "Minimal", "FFE06666"),
-    (12, "Value", 3, 6, "Limited", "FFF4B183"),
-    (13, "Value", 6, 9, "Moderate", "FFFFEB84"),
-    (14, "Value", 9, 12, "Significant", "FFA9D18E"),
-    (15, "Value", 12, 15, "Exceptional", "FF63BE7B"),
+    # minValue, id, RatingType, maxValue, BandName, ColourCode
+    (0, 1, "Likelihood", 5, "Very Low", "FFDCE6F1"),
+    (5, 2, "Likelihood", 10, "Low", "FFB8CCE4"),
+    (10, 3, "Likelihood", 15, "Moderate", "FF8DB4E2"),
+    (15, 4, "Likelihood", 20, "High", "FF538DD5"),
+    (20, 5, "Likelihood", 25, "Very High", "FF1F497D"),
+    (0, 6, "Risk", 5, "Minimal", "FF63BE7B"),
+    (5, 7, "Risk", 10, "Low", "FFA9D18E"),
+    (10, 8, "Risk", 15, "Moderate", "FFFFEB84"),
+    (15, 9, "Risk", 20, "High", "FFF4B183"),
+    (20, 10, "Risk", 25, "Very High", "FFE06666"),
+    (0, 11, "Value", 3, "Minimal", "FFE06666"),
+    (3, 12, "Value", 6, "Limited", "FFF4B183"),
+    (6, 13, "Value", 9, "Moderate", "FFFFEB84"),
+    (9, 14, "Value", 12, "Significant", "FFA9D18E"),
+    (12, 15, "Value", 15, "Exceptional", "FF63BE7B"),
 ]
 last_rl = write_table(ws, wb, "RatingLookup", 3,
-                       ["id", "RatingType", "minValue", "maxValue", "BandName", "ColourCode"],
-                       rating_rows, col_widths=[6, 14, 10, 10, 14, 12])
+                       ["minValue", "id", "RatingType", "maxValue", "BandName", "ColourCode"],
+                       rating_rows, col_widths=[10, 6, 14, 10, 14, 12])
 # swatch preview
 for i, row in enumerate(rating_rows):
     ws.cell(row=4 + i, column=7).fill = PatternFill("solid", fgColor=row[5])
 ws.column_dimensions["G"].width = 4
 
-# Per-type named ranges (5 contiguous rows each) power the INDEX/MATCH band
-# lookups on Tactical/Initiative/Assistance without needing array formulas.
+# Per-type named ranges (5 contiguous rows each) power the VLOOKUP band
+# lookups on Tactical/Initiative/Assistance. minValue leads id so the
+# band-id lookup (approximate match on minValue, return id) can be a plain
+# VLOOKUP; id leads the remaining columns so the Name/Colour lookups
+# (exact match on id) can be plain VLOOKUP too. Two table ranges per type
+# rather than four single-column ranges, since VLOOKUP needs a range, not
+# an array.
 def add_band_names(prefix, start_row):
-    wb.defined_names[f"{prefix}_Min"] = DefinedName(
-        f"{prefix}_Min", attr_text=f"RatingLookup!$C${start_row}:$C${start_row + 4}")
-    wb.defined_names[f"{prefix}_Name"] = DefinedName(
-        f"{prefix}_Name", attr_text=f"RatingLookup!$E${start_row}:$E${start_row + 4}")
-    wb.defined_names[f"{prefix}_Colour"] = DefinedName(
-        f"{prefix}_Colour", attr_text=f"RatingLookup!$F${start_row}:$F${start_row + 4}")
-    wb.defined_names[f"{prefix}_Id"] = DefinedName(
-        f"{prefix}_Id", attr_text=f"RatingLookup!$A${start_row}:$A${start_row + 4}")
+    wb.defined_names[f"{prefix}_MinTable"] = DefinedName(
+        f"{prefix}_MinTable", attr_text=f"RatingLookup!$A${start_row}:$B${start_row + 4}")
+    wb.defined_names[f"{prefix}_IdTable"] = DefinedName(
+        f"{prefix}_IdTable", attr_text=f"RatingLookup!$B${start_row}:$F${start_row + 4}")
 
 add_band_names("Likelihood", 4)
 add_band_names("Risk", 9)
@@ -398,9 +399,9 @@ def score():
 
 def band_formulas(raw_cell, id_col_letter, row, prefix):
     """Return (id_formula, name_formula, colour_formula) for a raw score cell."""
-    id_f = (f'=INDEX({prefix}_Id,MATCH({raw_cell},{prefix}_Min,1))')
-    name_f = f'=INDEX({prefix}_Name,MATCH({id_col_letter}{row},{prefix}_Id,0))'
-    colour_f = f'=INDEX({prefix}_Colour,MATCH({id_col_letter}{row},{prefix}_Id,0))'
+    id_f = f'=VLOOKUP({raw_cell},{prefix}_MinTable,2,TRUE)'
+    name_f = f'=VLOOKUP({id_col_letter}{row},{prefix}_IdTable,4,FALSE)'
+    colour_f = f'=VLOOKUP({id_col_letter}{row},{prefix}_IdTable,5,FALSE)'
     return id_f, name_f, colour_f
 
 
@@ -428,7 +429,7 @@ for title, _, _, _ in tactical_rows:
     style_body(ws.cell(row=r, column=5, value=capability))
     style_body(ws.cell(row=r, column=6, value=consequence))
     style_body(ws.cell(row=r, column=7, value=f"=D{r}*E{r}"))
-    style_body(ws.cell(row=r, column=8, value=f"=INDEX(Likelihood_Id,MATCH(G{r},Likelihood_Min,1))"))
+    style_body(ws.cell(row=r, column=8, value=f"=VLOOKUP(G{r},Likelihood_MinTable,2,TRUE)"))
     style_body(ws.cell(row=r, column=9, value=f"=H{r}*F{r}"))
     id_f, name_f, colour_f = band_formulas("I" + str(r), "J", r, "Risk")
     style_body(ws.cell(row=r, column=10, value=id_f))
@@ -540,7 +541,15 @@ for sheet_name, last_row in (("Initiative", last_initiative), ("Assistance", las
                        fill=PatternFill("solid", fgColor=colour, bgColor=colour))
         )
 
-wb.move_sheet("Instructions", offset=-10)
+# Tab order follows the data model / left-to-right reading order: each
+# type-specific lookup sits immediately before the scoring table that
+# consumes it (ProblemSet->Tactical, InitiativeType->Initiative,
+# AssistanceType->Assistance); RatingLookup goes last since all three
+# scoring tables share it rather than it belonging to one.
+SHEET_ORDER = ["Instructions", "Centres", "Position", "Resources", "Priority",
+               "ProblemSet", "Tactical", "InitiativeType", "Initiative",
+               "AssistanceType", "Assistance", "RatingLookup"]
+wb._sheets = [wb[name] for name in SHEET_ORDER]
 wb.active = 0
 
 wb.save(sys.argv[1] if len(sys.argv) > 1 else "management-preparation.xlsx")
