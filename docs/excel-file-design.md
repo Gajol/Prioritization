@@ -41,6 +41,18 @@ where the draft schema was ambiguous or impractical in Excel:
    `(Title, Type)` composite index) rather than a surrogate ID — fine as long as
    titles stay unique, which the synthesized data enforces, but worth a surrogate
    `PriorityId` if this ever needs to be more robust.
+6. `Resources`' FK key is a computed `FullName` (`FirstName & " " & LastName`),
+   not the DBML's `(FirstName, LastName)` composite — not practical as a single
+   Excel dropdown/lookup key.
+7. The draft's `TeamPriorities` (rank) and `TeamPriorityAllocation` (% of team
+   effort) — two separate tables sharing the same composite key — are merged
+   into one table, `Priorities` (the "Step 2 - Priorities & Ranking" sheet): a
+   Centre Lead ranks and allocates a Priority in the same action, so splitting
+   them into two tables/sheets would mean re-picking the same Team+Priority
+   twice for no benefit.
+
+(See `docs/management-technical-guide.md` for ERD diagrams of the model as
+actually built, split by theme for legibility.)
 
 ## Validation, without VBA
 

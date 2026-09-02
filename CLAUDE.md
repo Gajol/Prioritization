@@ -131,6 +131,8 @@ Write these as Markdown in `/docs`:
 1. How the Excel files are designed..  Include tools used (for example Python to build data model and links for online help)
    1. Include ERD diagrams based off the priorities.dbml file.  Ensure these are sized for easy reading in Letter mode.  Separating into more than one diagram maybe desirable. 
 2. A User Guide for Centre Leads.
+3. A User Guide for the Management
+4. A User Guide for the Management technical prime; including a visualization of the DMBL data model (multiple pages if required for legibility)
 
 ## References
 
@@ -288,8 +290,20 @@ Write these as Markdown in `/docs`:
   are now named TacticalScores/InitiativeScores/AssistanceScores to
   avoid it.
 - `/docs` — [`excel-file-design.md`](docs/excel-file-design.md) (design,
-  tooling, known gotchas/gaps) and
-  [`centre-lead-user-guide.md`](docs/centre-lead-user-guide.md) written.
+  tooling, known gotchas/gaps),
+  [`centre-lead-user-guide.md`](docs/centre-lead-user-guide.md), and, as of
+  2026-09-01,
+  [`management-user-guide.md`](docs/management-user-guide.md) (the
+  practical Excel-only-vs-needs-the-Build-person workflow, with 2 Mermaid
+  flowcharts) and
+  [`management-technical-guide.md`](docs/management-technical-guide.md)
+  (3 Mermaid ERD diagrams derived from priorities.dbml, split by theme —
+  scoring engine, people/positions, Centre Lead data entry — plus an
+  entity-to-physical-table map across all 3 workbooks) all written. This
+  satisfies CLAUDE.md's Outputs #2-4; #1's ERD sub-requirement was
+  previously unmet (no diagrams existed anywhere) and is now covered by
+  management-technical-guide.md rather than duplicated into
+  excel-file-design.md.
 - RESOLVED (2026-09-01): the process gap above (CLAUDE.md's Process
   section described a live data-connection refresh from preparation.xlsx
   when Management clones a centre file; what was actually built was a
@@ -344,33 +358,33 @@ Write these as Markdown in `/docs`:
      ever set on these sheets; protection was only ever a guard against
      an accidental Centre Lead typo, and any accidental edit gets
      overwritten by the next refresh regardless.
-  Verified (2026-09-01): a live add-a-row-to-preparation.xlsx-then-
-  Refresh-All test on a wired centre file showed the new row appearing
-  in the right split Priority table and its defined name within seconds,
-  with zero formula errors across the whole workbook afterward; the same
-  test against the *protected* design failed silently (RefreshAll
-  swallowed the per-connection error) until sheets were made
-  unprotected. Re-ran the dev-fixture + Consolidation regression
-  end-to-end against fixtures rebuilt through the full 3-stage pipeline
-  (make_test_centres.py now runs wire_reference_data.py + wire_data_model.py
-  on each fixture too, not just stage 1) — all 5 hand-computed FTE
-  values and the ECO/INF collision case still matched exactly.
-  All 6 real per-centre files now live in `management/centres/`
-  (Centre-CYB/ECO/INF/HLT/ENV/DIP.xlsx), built and wired through the
-  full pipeline, 14/16 relationships each, zero formula errors.
-  Gotcha for next time: `ListObjects.Add(SourceType=0, ...)` for a new
-  Power-Query connection intermittently failed with a blank, contentless
-  COM error after many rapid successive query-author attempts in one
-  long-running Excel session (reproduced even for a trivial literal
-  query with no external source at all, and even in the
-  already-proven-working Consolidation workbook) — resolved every time
-  by closing all open workbooks in that Excel session and retrying, no
-  code change involved. Looked exactly like an environment regression at
-  first (a completely unmodified, previously-working script failed
-  identically); turned out to be Excel/Mashup-engine session staleness
-  from heavy iteration, not a real bug. If this recurs, close all
-  workbooks (not just the one being wired) before assuming the recipe
-  itself is broken.
+     Verified (2026-09-01): a live add-a-row-to-preparation.xlsx-then-
+     Refresh-All test on a wired centre file showed the new row appearing
+     in the right split Priority table and its defined name within seconds,
+     with zero formula errors across the whole workbook afterward; the same
+     test against the *protected* design failed silently (RefreshAll
+     swallowed the per-connection error) until sheets were made
+     unprotected. Re-ran the dev-fixture + Consolidation regression
+     end-to-end against fixtures rebuilt through the full 3-stage pipeline
+     (make_test_centres.py now runs wire_reference_data.py + wire_data_model.py
+     on each fixture too, not just stage 1) — all 5 hand-computed FTE
+     values and the ECO/INF collision case still matched exactly.
+     All 6 real per-centre files now live in `management/centres/`
+     (Centre-CYB/ECO/INF/HLT/ENV/DIP.xlsx), built and wired through the
+     full pipeline, 14/16 relationships each, zero formula errors.
+     Gotcha for next time: `ListObjects.Add(SourceType=0, ...)` for a new
+     Power-Query connection intermittently failed with a blank, contentless
+     COM error after many rapid successive query-author attempts in one
+     long-running Excel session (reproduced even for a trivial literal
+     query with no external source at all, and even in the
+     already-proven-working Consolidation workbook) — resolved every time
+     by closing all open workbooks in that Excel session and retrying, no
+     code change involved. Looked exactly like an environment regression at
+     first (a completely unmodified, previously-working script failed
+     identically); turned out to be Excel/Mashup-engine session staleness
+     from heavy iteration, not a real bug. If this recurs, close all
+     workbooks (not just the one being wired) before assuming the recipe
+     itself is broken.
 - RESOLVED (2026-09-01), found via user report ("Step 3 - Resource
   Allocation Position Title (auto) field has #REF! errors") the very
   next session after the live-refresh work above shipped: real bug,
