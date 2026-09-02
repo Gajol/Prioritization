@@ -363,23 +363,30 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
         ws.column_dimensions[get_column_letter(i)].width = w
         style_header(ws.cell(row=1, column=i, value=h))
 
-    # Teams starts with exactly one blank data row (not a pre-built block
-    # of 200) plus a 14-row buffer below it (Team #2..#15 — CLAUDE.md caps
-    # this sheet at 15 teams so it "stays clean"). Only row 2 is part of
-    # the Table's official range; rows 3-16 are pre-unlocked, validated,
-    # and formatted so typing into row 3 both (a) is actually possible —
-    # under sheet protection a locked cell can't be typed into regardless
-    # of Table auto-extend, which is what made a true "just one row, grow
-    # organically" design impossible — and (b) grows the Table to absorb
-    # that row, D/E formulas included, since D/E are genuine calculated
-    # columns of this table (not adjacent grey cells outside it, which
-    # would silently NOT auto-fill on extend). The small starting size is
-    # also what unblocks the Data Model relationship to Teams: Power
-    # Pivot rejects a relationship whose "one" side looks like duplicate
-    # blanks, which 200 mostly-empty rows guaranteed and 1 does not.
-    teams_last_row = 2
-    teams_buffer_row = 16
-    for r in range(2, teams_buffer_row + 1):
+    # Teams is a real Table spanning all 15 team slots (rows 2-16, CLAUDE.md
+    # caps this sheet at 15 teams so it "stays clean") from generation time
+    # — NOT a single official row backed by a styled "buffer" that Excel
+    # auto-extends to absorb. That smaller design was tried first and
+    # confirmed broken (2026-09-01): typing into the row below a Table does
+    # NOT auto-extend it while the sheet is protected — verified against a
+    # live Excel session (Table.Range stayed $A$1:$E$2 after setting A3,
+    # and TeamNameList never picked up the second row) — on top of the
+    # already-documented finding that the native "Insert Table Row"/
+    # ListRows.Add() mechanism also fails under protection. With no
+    # protected-sheet mechanism to grow a Table at all, a Centre Lead's
+    # data in any row past the Table's official range was silently invisible
+    # to TeamNameList, the Step 2 team dropdown, and every SUMIFS/lookup
+    # against Teams[...]. Building the full 15 rows in up front (same
+    # pattern as Step 2/3, which use the real N_ROWS-row Table already)
+    # fixes that outright, at the cost of reopening the Data Model
+    # relationship blocker below for Teams specifically: Power Pivot
+    # rejects a relationship whose "one" side contains any blank, and with
+    # 15 rows always in the Table, any unused team slot stays blank
+    # forever (a real per-centre team count is very unlikely to hit 15).
+    # Accepted: nothing shipped depends on that relationship today — see
+    # CLAUDE.md's Status entry on the Resource x Team matrix PivotTable.
+    teams_last_row = 16
+    for r in range(2, teams_last_row + 1):
         style_body(ws.cell(row=r, column=1), editable=True)
         style_body(ws.cell(row=r, column=2), editable=True)
         style_body(ws.cell(row=r, column=3), editable=True)
@@ -405,13 +412,13 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     dv_resources.error = "Choose Yes, No, or Temp."
     dv_resources.errorTitle = "Invalid entry"
     ws.add_data_validation(dv_resources)
-    dv_resources.add(f"B2:B{teams_buffer_row}")
+    dv_resources.add(f"B2:B{teams_last_row}")
 
     dv_type = DataValidation(type="list", formula1="=PriorityTypeList", allow_blank=True)
     dv_type.error = "Choose Tactical, Initiative, or Assistance."
     dv_type.errorTitle = "Invalid entry"
     ws.add_data_validation(dv_type)
-    dv_type.add(f"C2:C{teams_buffer_row}")
+    dv_type.add(f"C2:C{teams_last_row}")
 
     # Plain range, not Teams[Team Name]: a structured reference here (valid
     # syntax, verified by hand) made Excel strip Data Validation from this
@@ -419,13 +426,13 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     # Table structured references the way regular cell formulas do.
     dv_unique_team = DataValidation(
         type="custom",
-        formula1=f'=AND($A2<>"",COUNTIF($A$2:$A${teams_buffer_row},$A2)=1)',
+        formula1=f'=AND($A2<>"",COUNTIF($A$2:$A${teams_last_row},$A2)=1)',
         allow_blank=True,
     )
     dv_unique_team.error = "Team names must be unique within this workbook."
     dv_unique_team.errorTitle = "Duplicate team name"
     ws.add_data_validation(dv_unique_team)
-    dv_unique_team.add(f"A2:A{teams_buffer_row}")
+    dv_unique_team.add(f"A2:A{teams_last_row}")
 
     ws.protection.sheet = True
 
@@ -435,7 +442,7 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
         ('AND($A2<>"",$D2=1)', GREEN, GREEN_TEXT),
     ):
         ws.conditional_formatting.add(
-            f"D2:D{teams_buffer_row}",
+            f"D2:D{teams_last_row}",
             FormulaRule(formula=[op], fill=PatternFill("solid", fgColor=colour, bgColor=colour),
                         font=Font(name=FONT, color=text_colour))
         )

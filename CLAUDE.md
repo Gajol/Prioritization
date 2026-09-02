@@ -120,6 +120,10 @@ The workflow for a Centre Lead is:
 - A Teams allocation to Priorities should total 100%
 - A Resource allocation to Teams should not be greater than 100% (it does not have to total 100%)
 
+### Excel Tables
+
+- Excel tables in an Excel tab should be choose a design pattern that provides for visual clues as to the size of the table. 
+
 ## Outputs
 
 Write these as Markdown in `/docs`:
@@ -156,20 +160,23 @@ Write these as Markdown in `/docs`:
   (Teams, Priorities & Ranking, Resource Allocation), native Excel
   validation only, no VBA. Embeds read-only copies of all 11 reference
   tables from preparation.xlsx and shares its data model — same table
-  names/columns. Wired into its own Power Pivot Data Model (15/17
-  relationships live; the 2 involving Teams can't be created until a
-  Centre Lead fills in real team data. Confirmed by re-running
-  wire_data_model.py against the current template (2026-08-17): Power
-  Pivot rejects the relationship even with Teams shrunk to a single
-  blank data row — the real rule is that the "one" side's key column
-  can't contain *any* blank, not just duplicate blanks as originally
-  assumed. So there's no template-side trick that unblocks this before
-  real data exists; re-run wire_data_model.py, which is idempotent,
-  once a Centre Lead has filled in Step 1 - Teams. CONFIRMED WORKING
-  (2026-08-17) against 3 filled dev fixtures
-  (management/scripts/dev_fixtures/make_test_centres.py) — all three
-  wired to 17/17 relationships once real, non-blank Team Name data
-  existed. Centre Name/Code on the Instructions sheet are now stamped
+  names/columns. Wired into its own Power Pivot Data Model — 15/17
+  relationships live, permanently: the 2 involving Teams can never be
+  created, by design (see the RESOLVED entry below on Step 1 - Teams
+  becoming a real 15-row Table). Power Pivot rejects a relationship
+  whose "one" side key column contains *any* blank, and Teams always has
+  13+ blank rows for any centre with fewer than 15 teams — confirmed via
+  wire_data_model.py against both the unfilled template and filled dev
+  fixtures (management/scripts/dev_fixtures/make_test_centres.py), both
+  landing at 15/17. (An earlier version of this note claimed 17/17 was
+  reachable once real data existed — that was measured against a
+  since-abandoned single-row-Table design; see the RESOLVED entry below
+  for why it was replaced.) Nothing shipped depends on those 2
+  relationships today; see the Resource x Team matrix PivotTable entry
+  further down for the feature that eventually will, and how it'll need
+  to work around this (likely the same Power-Query-filters-blanks
+  approach the Consolidation workbook already uses). Centre Name/Code on
+  the Instructions sheet are now stamped
   and locked at generation time (build_centre_template.py's `main()`
   takes an optional centre_name/centre_code, validated against
   preparation.xlsx's Centres table; `--all` generates all six in one
@@ -178,6 +185,34 @@ Write these as Markdown in `/docs`:
   - Row 2 is no longer prefilled with example data (was confusing on a
     recurring-use workbook); worked example moved into the Instructions
     tab as text.
+  - RESOLVED (2026-09-01), previously silent data-loss bug: Step 1 - Teams'
+    "official Table = row 2 only, backed by a styled/unlocked 14-row
+    buffer that Excel auto-extends to absorb" design (shipped in e36ca92)
+    did not work. Typing into the buffer rows was real — the cells were
+    unlocked and took input fine — but the Table never actually grew to
+    include them, verified against a live Excel session (Table.Range
+    stayed `$A$1:$E$2` after setting A3, both by direct user report and by
+    a COM-driven reproduction). Since `TeamNameList`, the Step 2 team
+    dropdown, and every `SUMIFS`/lookup against `Teams[...]` all key off
+    the Table's actual range, a Centre Lead's 2nd through 15th team were
+    silently invisible everywhere downstream — a real data-loss bug, not
+    just a cosmetic one (it was reported as "the table's visual size
+    doesn't match the shading" before the underlying cause was found).
+    Root cause: no protected-sheet mechanism exists to grow an Excel
+    Table at all (see the resize/protection finding elsewhere in this
+    Status section) — the buffer-row design assumed typing-triggered
+    auto-extend was an exception to that, which was never actually
+    verified against live interactive typing (only against a dev-fixture
+    script that force-set `Table.ref` directly via openpyxl, bypassing
+    the question entirely). Fix: Step 1 - Teams is now a real, full
+    15-row Table (`A1:E16`) from generation time, the same pattern
+    Step 2/3 already used successfully with their 200-row Tables — no
+    resize ever needed. Verified fixed via the same live-Excel
+    reproduction (Table.Range now `$A$1:$E$16` immediately, and
+    `TeamNameList` correctly picks up every row typed into). Trade-off
+    accepted: this reopens the Teams-relationship Power Pivot blocker
+    covered above, permanently rather than just pre-fill — judged worth
+    it since nothing shipped depends on that relationship today.
   - NEW (2026-08-17): "Step 2 - Priorities & Ranking" has a `Value/Risk
     (auto)` column — Management's Risk (Tactical) or Value (Initiative/
     Assistance) band for the row's Priority, looked up from the already-
@@ -265,6 +300,16 @@ Write these as Markdown in `/docs`:
   relationships respectively — unchanged from before, since the Data
   Model wiring addresses RatingLookup.id by name, not position). See
   excel-file-design.md.
+  Re-verified (2026-09-01) that this reorder didn't regress the
+  Consolidation workbook: regenerated the 3 dev fixtures
+  (management/scripts/dev_fixtures/make_test_centres.py) against the
+  updated preparation.xlsx (unaffected by the reorder, since
+  random.seed(42) keeps the synthesized Priority titles deterministic),
+  then refreshed management/consolidation/consolidation.xlsx's Power
+  Query + Data Model against them (read-only check, not saved). All 5
+  hand-computed FTE Delivered to Priority values matched exactly, Total
+  FTE = 3.00 as expected, and the ECO/INF "Ops Team" name-collision case
+  stayed correctly separate (0.75 vs 0.25, never merged).
 - UNBLOCKED, not yet built (2026-08-17, see below for the long PARKED
   history this closes): Resource x Team matrix PivotTable, sourced from
   the Power Pivot Data Model, in templates/centre-template.xlsx. Both
@@ -292,18 +337,16 @@ Write these as Markdown in `/docs`:
      more reason to prefer manual creation over scripting it — see
      `management/consolidation/create_pivots.py` for the working pattern
      to reuse here.
-     Separately, RESOLVED (shipped in e36ca92): Excel Tables categorically
-     cannot be resized while their sheet is protected — confirmed via two
-     independent native mechanisms (typing into the row below, and
-     `ListRows.Add()` / Insert Table Row), the latter failing identically
-     even with `AllowInsertingRows=True` explicitly granted on
-     `Worksheet.Protect`. Fix: Step 1 - Teams' official Table range is a
-     single data row, backed by a 14-row buffer (rows 3-16, teams #2-15)
-     that's pre-styled/validated/unlocked but sits outside the Table —
-     typing into it works under protection, and the Table auto-extends to
-     absorb the row. Sheet protection stays on throughout, so no need to
-     leave Step 1 unprotected. This fix was originally motivated by the
-     Teams relationship problem above but doesn't solve it (see above —
-     the real blocker is any blank on the one-side key, not duplicate
-     blanks); it's kept anyway since it's a real, independently-useful fix
-     for the protection/resize conflict.
+     Separately: Excel Tables categorically cannot be resized while their
+     sheet is protected — confirmed via two independent native mechanisms
+     (typing into the row below, and `ListRows.Add()` / Insert Table Row),
+     the latter failing identically even with `AllowInsertingRows=True`
+     explicitly granted on `Worksheet.Protect`. An earlier fix attempt (shipped
+     in e36ca92, superseded 2026-09-01 — see the Step 1 - Teams RESOLVED
+     entry below) tried backing a single-row official Table with a styled,
+     unlocked "buffer" below it, on the theory that typing into the row
+     immediately below a Table auto-extends it even under protection. That
+     theory was never actually true — see below — so Step 1 - Teams is now
+     a real, full-size Table from generation time instead, sidestepping the
+     resize question entirely (nothing needs to resize under protection
+     because nothing needs to grow).

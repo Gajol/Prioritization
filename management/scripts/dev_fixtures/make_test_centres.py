@@ -115,8 +115,8 @@ def fill_fixture(out_path, teams, priorities, allocations):
         ws.cell(row=row, column=1, value=name)
         ws.cell(row=row, column=2, value=dedicated)
         ws.cell(row=row, column=3, value=ptype)
-    last_team_row = 1 + len(teams)
-    ws.tables["Teams"].ref = f"A1:E{last_team_row}"
+    # Teams is now a real 15-row Table from generation time (see
+    # build_centre_template.py's Step 1 comment) — no resize needed here.
 
     ws = wb["Step 2 - Priorities & Ranking"]
     for i, (team, title, rank, resourced, pct) in enumerate(priorities):
