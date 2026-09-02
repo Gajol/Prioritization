@@ -11,115 +11,113 @@ build recipe itself is [`excel-file-design.md`](excel-file-design.md)).
 The canonical schema is [`data-model/priorities.dbml`](../data-model/priorities.dbml)
 (DBML format — [dbdiagram.io](https://dbdiagram.io) or the
 [VS Code DBML extension](https://marketplace.visualstudio.com/items?itemName=matt-meyers.vscode-dbml)
-can render it directly). The diagrams below are derived from it, split into
-three pages by theme for legibility, each sized to fit comfortably on a
-Letter-size page.
+can render it directly). The diagrams below are derived from it, split by
+theme — and, within the scoring engine, by Priority Type — so each one
+stays small enough to actually read at a glance, rather than one page you
+have to zoom into.
 
 ## How to read these diagrams
 
 Standard crow's-foot notation: `||` = exactly one, `o{` = zero or more.
-`PK` = primary key, `FK` = foreign key. Computed columns (Excel formulas,
-not something anyone types) are marked "computed."
+`PK` = primary key, `FK` = foreign key. Each diagram shows entity names and
+keys only — full column lists (including which columns are Excel formulas,
+not something anyone types) are in the table right below it.
 
 ## 1. Scoring engine (Preparation phase)
 
-The core of the model: every Priority gets scored on exactly one of three
-tracks depending on its Type, each pulling from its own small set of
-category lookups and sharing one banding table.
+Every Priority gets scored on exactly one of three tracks depending on its
+Type. All three tracks have the *same shape* — a raw-inputs table joined to
+Priority, its own small category lookup, and the shared Centres/RatingLookup
+tables — so they're shown as three parallel diagrams rather than one
+tangled one.
+
+### 1a. Tactical (Risk)
 
 ```mermaid
 erDiagram
-    PRIORITY ||--o| TACTICAL : "Title = PriorityReference, Type = Tactical"
-    PRIORITY ||--o| INITIATIVE : "Title = PriorityReference, Type = Initiative"
-    PRIORITY ||--o| ASSISTANCE : "Title = PriorityReference, Type = Assistance"
+    PRIORITY ||--o| TACTICAL : "Title = PriorityReference"
     PROBLEMSET ||--o{ TACTICAL : "ProblemSet FK"
-    INITIATIVETYPE ||--o{ INITIATIVE : "InitiativeType FK"
-    ASSISTANCETYPE ||--o{ ASSISTANCE : "AssistanceType FK"
-    CENTRES ||--o{ TACTICAL : "Actor FK (CentreCode)"
-    CENTRES ||--o{ INITIATIVE : "Actor FK (CentreCode)"
-    CENTRES ||--o{ ASSISTANCE : "Actor FK (CentreCode)"
+    CENTRES ||--o{ TACTICAL : "Actor FK"
     RATINGLOOKUP ||--o{ TACTICAL : "RiskLabelId FK"
-    RATINGLOOKUP ||--o{ INITIATIVE : "ValueLabelId FK"
-    RATINGLOOKUP ||--o{ ASSISTANCE : "ValueLabelId FK"
-
-    PRIORITY {
-        varchar Title PK
-        enum Type PK "Tactical/Initiative/Assistance"
-        varchar Impact
-        enum Resources "Yes/No/Temp"
-    }
-    TACTICAL {
-        varchar PriorityReference PK "FK to Priority.Title"
-        varchar Actor FK "Centres.CentreCode"
-        int ProblemSet FK
-        int Intent "raw input, 0-5"
-        int Capability "raw input, 0-5"
-        int Consequence "raw input, 0-5"
-        int Likelihood "computed: Intent x Capability"
-        int LikelihoodLevel "computed: band id, 1-5"
-        int RiskRaw "computed: LikelihoodLevel x Consequence"
-        int RiskLabelId FK "RatingLookup.id"
-        varchar RiskLabel "computed"
-        varchar RiskColour "computed"
-    }
-    INITIATIVE {
-        varchar PriorityReference PK "FK to Priority.Title"
-        varchar Actor FK "Centres.CentreCode"
-        int InitiativeType FK
-        int Dividend "raw input, 0-5"
-        int Feasibility "raw input, 0-5"
-        int Cost "raw input, 0-5"
-        int Value "computed: sum of the three"
-        int ValueLabelId FK "RatingLookup.id"
-        varchar ValueLabel "computed"
-        varchar ValueColour "computed"
-    }
-    ASSISTANCE {
-        varchar PriorityReference PK "FK to Priority.Title"
-        varchar Actor FK "Centres.CentreCode"
-        int AssistanceType FK
-        int Alignment "raw input, 0-5"
-        int Contribution "raw input, 0-5"
-        int Capacity "raw input, 0-5"
-        int Value "computed: sum of the three"
-        int ValueLabelId FK "RatingLookup.id"
-        varchar ValueLabel "computed"
-        varchar ValueColour "computed"
-    }
-    PROBLEMSET {
-        int id PK
-        varchar Title
-        varchar TacticalType
-        varchar ProblemSetShortCode
-    }
-    INITIATIVETYPE {
-        int id PK
-        varchar Title
-        varchar Level1
-        varchar Level2
-        varchar InitiativeShortCode
-    }
-    ASSISTANCETYPE {
-        int id PK
-        varchar Title
-        varchar Level1
-        varchar Level2
-        varchar AssistanceShortCode
-    }
-    RATINGLOOKUP {
-        decimal minValue
-        int id PK
-        varchar RatingType "Likelihood/Risk/Value"
-        decimal maxValue
-        varchar BandName
-        varchar ColourCode
-    }
-    CENTRES {
-        int id PK
-        varchar Centre
-        varchar CentreCode
-    }
 ```
+
+| Table | Column | Notes |
+|---|---|---|
+| **Priority** | Title | PK |
+| | Type | PK — "Tactical" for this track |
+| | Impact, Resources | |
+| **Tactical** | PriorityReference | PK, FK → Priority.Title |
+| | Actor | FK → Centres.CentreCode |
+| | ProblemSet | FK → ProblemSet.id |
+| | Intent, Capability, Consequence | raw inputs, 0-5 |
+| | Likelihood | computed: Intent × Capability |
+| | LikelihoodLevel | computed: band id, 1-5 |
+| | RiskRaw | computed: LikelihoodLevel × Consequence |
+| | RiskLabelId | FK → RatingLookup.id |
+| | RiskLabel, RiskColour | computed |
+| **ProblemSet** | id | PK |
+| | Title, TacticalType, ProblemSetShortCode | |
+
+### 1b. Initiative (Value)
+
+```mermaid
+erDiagram
+    PRIORITY ||--o| INITIATIVE : "Title = PriorityReference"
+    INITIATIVETYPE ||--o{ INITIATIVE : "InitiativeType FK"
+    CENTRES ||--o{ INITIATIVE : "Actor FK"
+    RATINGLOOKUP ||--o{ INITIATIVE : "ValueLabelId FK"
+```
+
+| Table | Column | Notes |
+|---|---|---|
+| **Priority** | Title | PK |
+| | Type | PK — "Initiative" for this track |
+| | Impact, Resources | |
+| **Initiative** | PriorityReference | PK, FK → Priority.Title |
+| | Actor | FK → Centres.CentreCode |
+| | InitiativeType | FK → InitiativeType.id |
+| | Dividend, Feasibility, Cost | raw inputs, 0-5 |
+| | Value | computed: sum of the three |
+| | ValueLabelId | FK → RatingLookup.id |
+| | ValueLabel, ValueColour | computed |
+| **InitiativeType** | id | PK |
+| | Title, Level1, Level2, InitiativeShortCode | |
+
+### 1c. Assistance (Value)
+
+```mermaid
+erDiagram
+    PRIORITY ||--o| ASSISTANCE : "Title = PriorityReference"
+    ASSISTANCETYPE ||--o{ ASSISTANCE : "AssistanceType FK"
+    CENTRES ||--o{ ASSISTANCE : "Actor FK"
+    RATINGLOOKUP ||--o{ ASSISTANCE : "ValueLabelId FK"
+```
+
+| Table | Column | Notes |
+|---|---|---|
+| **Priority** | Title | PK |
+| | Type | PK — "Assistance" for this track |
+| | Impact, Resources | |
+| **Assistance** | PriorityReference | PK, FK → Priority.Title |
+| | Actor | FK → Centres.CentreCode |
+| | AssistanceType | FK → AssistanceType.id |
+| | Alignment, Contribution, Capacity | raw inputs, 0-5 |
+| | Value | computed: sum of the three |
+| | ValueLabelId | FK → RatingLookup.id |
+| | ValueLabel, ValueColour | computed |
+| **AssistanceType** | id | PK |
+| | Title, Level1, Level2, AssistanceShortCode | |
+
+### Shared by all three tracks
+
+| Table | Column | Notes |
+|---|---|---|
+| **Centres** | id | PK |
+| | Centre, CentreCode | |
+| **RatingLookup** | id | PK |
+| | minValue, maxValue | band thresholds |
+| | RatingType | Likelihood / Risk / Value |
+| | BandName, ColourCode | |
 
 **As-built note**: in each of the six centre files, `PRIORITY` is split
 three ways by Type — `PriorityTactical`/`PriorityInitiative`/
@@ -172,32 +170,28 @@ erDiagram
     PRIORITY ||--o{ PRIORITIES : "Priority Title FK"
     TEAMS ||--o{ RESOURCEALLOCATION : "Team Name FK"
     RESOURCES ||--o{ RESOURCEALLOCATION : "FullName FK"
-
-    TEAMS {
-        varchar TeamName PK
-        int CentreId FK
-        enum ResourcesDedicated "Yes/No/Temp"
-        enum Type "Tactical/Initiative/Assistance"
-        decimal PriorityAllocationTotal "computed"
-        decimal ResourceEffortTotal "computed, FTE"
-    }
-    PRIORITIES {
-        varchar TeamName FK
-        varchar PriorityTitle FK
-        enum Type "computed, from Team"
-        int Rank
-        enum Resourced "Yes/No"
-        decimal AllocationPercentTeamEffort
-        varchar ValueRisk "computed, from the scoring tables"
-    }
-    RESOURCEALLOCATION {
-        varchar Resource FK "FullName"
-        varchar PositionTitle "computed, from Resources"
-        varchar TeamName FK
-        decimal AllocationPercentPersonEffort
-        decimal PersonTotalPercent "computed"
-    }
 ```
+
+| Table | Column | Notes |
+|---|---|---|
+| **Teams** | TeamName | PK |
+| | CentreId | FK → Centres.id |
+| | ResourcesDedicated | Yes/No/Temp |
+| | Type | Tactical/Initiative/Assistance |
+| | PriorityAllocationTotal | computed |
+| | ResourceEffortTotal | computed, FTE |
+| **Priorities** | TeamName | FK → Teams.TeamName |
+| | PriorityTitle | FK → Priority.Title |
+| | Type | computed, from Team |
+| | Rank | |
+| | Resourced | Yes/No |
+| | AllocationPercentTeamEffort | |
+| | ValueRisk | computed, from the scoring tables |
+| **ResourceAllocation** | Resource | FK → Resources.FullName |
+| | PositionTitle | computed, from Resources |
+| | TeamName | FK → Teams.TeamName |
+| | AllocationPercentPersonEffort | |
+| | PersonTotalPercent | computed |
 
 **As-built note, a real simplification from the draft DBML**: the draft
 schema has two separate tables for Step 2 — `TeamPriorities` (rank) and
