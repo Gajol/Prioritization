@@ -371,6 +371,40 @@ Write these as Markdown in `/docs`:
   from heavy iteration, not a real bug. If this recurs, close all
   workbooks (not just the one being wired) before assuming the recipe
   itself is broken.
+- RESOLVED (2026-09-01), found via user report ("Step 3 - Resource
+  Allocation Position Title (auto) field has #REF! errors") the very
+  next session after the live-refresh work above shipped: real bug,
+  latent in every workbook built by that work (the master template, all
+  6 real centre files, all 3 dev fixtures). Step 2's `Value/Risk (auto)`
+  and Step 3's `Position Title (auto)` columns had their formulas written
+  by build_centre_template.py (stage 1) referencing TacticalScores/
+  InitiativeScores/AssistanceScores/Resources — tables that don't exist
+  until stage 2 (wire_reference_data.py) creates them. The instant Excel
+  first opened that stage-1-only file — including wire_reference_data.py's
+  own first open of it — it couldn't resolve those table names and
+  silently, PERMANENTLY rewrote the structured references to literal
+  `#REF!` in the formula text. Creating the tables afterward doesn't
+  un-corrupt an already-`#REF!`'d formula. Escaped detection because (a)
+  cells with a blank input column short-circuit past the broken branch,
+  so an unfilled workbook shows zero visible errors, and (b) the
+  Consolidation workbook's DAX measures don't read either of these
+  "(auto)" columns at all, so even the filled dev-fixture regression
+  passed clean. Fixed by having build_centre_template.py leave these two
+  columns styled but formula-less, and wire_reference_data.py setting the
+  real formula (one bulk `Range.Formula` assignment per column, after
+  temporarily unprotecting each sheet — Steps 2/3 stay protected
+  otherwise, unlike the reference sheets) once the tables it references
+  genuinely exist. Verified by actually typing a Team/Priority/Resource
+  into a fresh workbook and confirming all three auto-columns compute
+  correctly (not just checking for absence of errors on blank rows, the
+  gap that let this ship in the first place) — then rebuilt and
+  re-verified the master template, all 6 real centre files, and all 3 dev
+  fixtures the same way, plus re-ran the Consolidation regression via its
+  actual PivotTable (FTEByPriority) rather than ad-hoc CUBEVALUE formulas,
+  which turned out to have their own unrelated `#GETTING_DATA`
+  (Excel error 2043) timing flakiness under heavy COM automation load —
+  a verification-harness quirk, not a product defect; the real PivotTable
+  matched all 5 hand-computed values exactly.
 - RESOLVED (2026-09-01): the RatingLookup-driven band formulas
   (`band_formulas()` in build_preparation.py) used INDEX/MATCH rather than
   VLOOKUP, which cut against maintainability by an intermediate Excel

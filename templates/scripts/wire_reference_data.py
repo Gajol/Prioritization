@@ -53,6 +53,34 @@ same reason -- a genuine Table-column CF rule (as opposed to a CF rule
 that merely happens to cover a table's current extent) is tracked by
 Excel and auto-extends when the table grows or shrinks on refresh.
 
+Step 2's Value/Risk (auto) column and Step 3's Position Title (auto)
+column are ALSO set here, at the very end of main(), not by
+build_centre_template.py -- a real bug found and fixed 2026-09-01. Those
+two formulas reference TacticalScores/InitiativeScores/AssistanceScores/
+Resources, none of which exist yet when build_centre_template.py (stage
+1) saves its output. Writing the formula text there anyway (as an
+earlier version of this script's design did) meant the very first time
+Excel opened that stage-1-only file -- including the first open by this
+script itself -- it couldn't resolve those table names and silently,
+PERMANENTLY rewrote the structured references to literal #REF! in the
+formula. Creating the tables afterward doesn't un-corrupt an
+already-#REF!'d formula; nothing short of retyping it does. This was
+masked in testing for a while: cells with a blank input column
+short-circuit past the broken branch (`IF($A2="","",...)`), so an
+unfilled template shows zero visible errors, and the Consolidation
+workbook's DAX measures don't read these particular "(auto)" columns at
+all -- only actually typing a Resource/Priority into a filled row
+surfaces it. Fixed by having build_centre_template.py leave these two
+columns styled but formula-less, and setting the real formula here in
+one bulk Range.Formula assignment per column (Excel auto-relatives the
+row references across the range, same result as the old per-row loop),
+after the tables they reference genuinely exist. Both target sheets are
+protected (computed cells locked, same as always), which blocks writing
+into them at all -- even via COM -- so main() unprotects each sheet
+immediately before its Range.Formula assignment and reprotects it right
+after; unlike the reference sheets above, Steps 2/3 never need to stay
+unprotected, since they're static input tables, not Power-Query-driven.
+
 RatingLookup is the one reference table deliberately NOT converted here
 -- still built as a static copy by build_centre_template.py. It's a
 structural constant (3 RatingTypes x 5 bands, in that exact grouped
@@ -102,7 +130,9 @@ import win32com.client as win32
 from openpyxl.utils import get_column_letter
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from build_centre_template import REF_HEADER_FILL, HEADER_FONT_COLOR, RISK_BANDS, VALUE_BANDS  # noqa: E402
+from build_centre_template import (  # noqa: E402
+    REF_HEADER_FILL, HEADER_FONT_COLOR, RISK_BANDS, VALUE_BANDS, N_ROWS,
+)
 
 PREP_PATH_M = 'Excel.CurrentWorkbook(){[Name="Config"]}[Content]{0}[PrepFilePath]'
 
@@ -298,6 +328,43 @@ def main(workbook_name):
             print(f"OK defined name: {ptype}")
         else:
             print(f"SKIP (already exists): {ptype}")
+
+    # Step 2's Value/Risk (auto) and Step 3's Position Title (auto) also
+    # need to wait until this point: they reference TacticalScores/
+    # InitiativeScores/AssistanceScores/Resources, which build_centre_template.py
+    # deliberately does NOT write as formulas (see its comments on these
+    # two columns) -- opening a file where those formulas already exist
+    # but the tables they reference don't corrupts the structured
+    # references to #REF! permanently, the instant Excel first opens the
+    # stage-1-only file, before this script ever runs. Setting the whole
+    # column in one Range.Formula assignment (not a per-row loop) lets
+    # Excel auto-relative the row references itself, same result as the
+    # old per-row openpyxl loop, one COM call instead of N_ROWS.
+    # Both sheets are protected (computed cells locked -- see
+    # build_centre_template.py), which blocks writing into them even via
+    # COM; unlike the reference sheets above, Steps 2/3 don't need to
+    # stay unprotected for a live refresh (they're the Centre Lead's own
+    # static input tables, never Power-Query-driven), so a temporary
+    # unprotect/reprotect around just this write is safe and simplest.
+    last_row = N_ROWS + 1
+    ws_step2 = wb.Worksheets("Step 2 - Priorities & Ranking")
+    ws_step2.Unprotect()
+    ws_step2.Range(f"G2:G{last_row}").Formula = (
+        '=IF($B2="","",'
+        'IF($C2="Tactical",IFERROR(INDEX(TacticalScores[RiskLabel],MATCH($B2,TacticalScores[PriorityReference],0)),"unknown"),'
+        'IF($C2="Initiative",IFERROR(INDEX(InitiativeScores[ValueLabel],MATCH($B2,InitiativeScores[PriorityReference],0)),"unknown"),'
+        'IF($C2="Assistance",IFERROR(INDEX(AssistanceScores[ValueLabel],MATCH($B2,AssistanceScores[PriorityReference],0)),"unknown"),'
+        '""))))'
+    )
+    ws_step2.Protect()
+    print("OK formula set: Step 2 - Priorities & Ranking!G2:G{}".format(last_row))
+    ws_step3 = wb.Worksheets("Step 3 - Resource Allocation")
+    ws_step3.Unprotect()
+    ws_step3.Range(f"B2:B{last_row}").Formula = (
+        '=IF($A2="","",IFERROR(INDEX(Resources[PositionTitle],MATCH($A2,Resources[FullName],0)),"unknown resource"))'
+    )
+    ws_step3.Protect()
+    print("OK formula set: Step 3 - Resource Allocation!B2:B{}".format(last_row))
 
     for name in reversed(SHEET_ORDER):
         if name in {s.Name for s in wb.Worksheets}:

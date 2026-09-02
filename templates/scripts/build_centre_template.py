@@ -445,15 +445,17 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
         # whichever of the three embedded scoring tables matches this row's
         # own Type (auto), so Centre Leads see it right where they're
         # deciding how to rank, not just after the fact.
-        c7 = ws.cell(row=r, column=7)
-        style_computed(c7)
-        c7.value = (
-            f'=IF($B{r}="","",'
-            f'IF($C{r}="Tactical",IFERROR(INDEX(TacticalScores[RiskLabel],MATCH($B{r},TacticalScores[PriorityReference],0)),"unknown"),'
-            f'IF($C{r}="Initiative",IFERROR(INDEX(InitiativeScores[ValueLabel],MATCH($B{r},InitiativeScores[PriorityReference],0)),"unknown"),'
-            f'IF($C{r}="Assistance",IFERROR(INDEX(AssistanceScores[ValueLabel],MATCH($B{r},AssistanceScores[PriorityReference],0)),"unknown"),'
-            f'""))))'
-        )
+        # NOT written here: this formula references TacticalScores/
+        # InitiativeScores/AssistanceScores, which don't exist until stage
+        # 2 (wire_reference_data.py) creates them. Writing it here (as an
+        # earlier version did) means the very first time Excel opens this
+        # stage-1-only file, it can't resolve those table names and
+        # PERMANENTLY rewrites the structured references to #REF! in the
+        # formula text itself -- creating the tables afterward does not
+        # un-corrupt an already-#REF!'d formula. wire_reference_data.py
+        # sets this formula (same text, via a single bulk Range.Formula
+        # assignment) once those 3 tables genuinely exist.
+        style_computed(ws.cell(row=r, column=7))
 
     tab = Table(displayName="Priorities", ref=f"A1:G{last_row}")
     tab.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
@@ -536,9 +538,12 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
 
     for r in range(2, last_row + 1):
         style_body(ws.cell(row=r, column=1), editable=True)
-        c2 = ws.cell(row=r, column=2)
-        style_computed(c2)
-        c2.value = f'=IF($A{r}="","",IFERROR(INDEX(Resources[PositionTitle],MATCH($A{r},Resources[FullName],0)),"unknown resource"))'
+        # NOT written here: this formula references Resources, which
+        # doesn't exist until stage 2 (wire_reference_data.py) creates it
+        # -- see the matching note on Step 2's Value/Risk (auto) column
+        # above for why writing a cross-stage table reference in stage 1
+        # would permanently corrupt it to #REF!.
+        style_computed(ws.cell(row=r, column=2))
         style_body(ws.cell(row=r, column=3), editable=True)
         style_body(ws.cell(row=r, column=4), editable=True)
         ws.cell(row=r, column=4).number_format = "0%"
