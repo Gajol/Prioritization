@@ -1,10 +1,20 @@
 """
 Generate the Centre Lead data-entry workbook, sharing the same data model
-as management/preparation.xlsx: it embeds read-only copies of Management's
-reference tables (Centres, Position, ProblemSet, InitiativeType,
-AssistanceType, RatingLookup, Resources, Priority, Tactical, Initiative,
-Assistance) and adds the Centre Lead's own input tables (Teams, Priorities
-& Ranking, Resource Allocation).
+as management/preparation.xlsx, and adds the Centre Lead's own input
+tables (Teams, Priorities & Ranking, Resource Allocation).
+
+This is stage 1 of a 2-stage build (mirroring how the Consolidation
+workbook is built): this script only creates RatingLookup (a static copy
+— see wire_reference_data.py's docstring for why it alone stays static),
+the small hardcoded Lookups enum sheet, and the Instructions/Step 1-3
+sheets. Every other reference sheet (Centres, Position, ProblemSet,
+InitiativeType, AssistanceType, Resources, Priority split 3 ways by Type,
+and the Tactical/Initiative/Assistance scoring tables) is created by
+running templates/scripts/wire_reference_data.py against this script's
+output next, via COM against a running Excel — it authors Power Query
+connections back to preparation.xlsx so Management can update reference
+data and refresh (Data > Refresh All) without needing Python at all. The
+output of stage 1 alone is not a complete, distributable workbook.
 
 Usage:
     python build_centre_template.py <preparation.xlsx> <output.xlsx> [centre-code]
@@ -24,9 +34,12 @@ styles: a LibreOffice-resaved copy of this workbook triggered Excel's
 zero formula errors. Ship only the openpyxl-original; use LibreOffice
 solely as a disposable formula-correctness check.
 
-Then run ../../management/scripts/wire_data_model.py (with the output
-file open in Excel) to wire the tables into the Power Pivot Data Model —
-that resave is safe, since it's done by real Excel.
+Then, with the output file open in Excel, run (in this order):
+    1. wire_reference_data.py <workbook-name> <preparation.xlsx-path> —
+       authors the Power-Query-refreshable reference sheets.
+    2. ../../management/scripts/wire_data_model.py — wires the tables
+       into the Power Pivot Data Model.
+Both resaves are safe, since they're done by real Excel.
 """
 import sys
 from pathlib import Path
@@ -156,10 +169,13 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
         ("This workbook shares its data model with Management's Preparation "
          "workbook (data-model/priorities.dbml). The grey-header sheets "
          "(Centres, Position, ProblemSet, InitiativeType, AssistanceType, "
-         "RatingLookup, Resources, Priority, Tactical, Initiative, "
-         "Assistance) are a READ-ONLY copy of Management's reference data, "
-         "protected against editing. The blue-header sheets are yours to "
-         "fill in.", None, False),
+         "RatingLookup, Resources, Priority - Tactical/Initiative/"
+         "Assistance, Tactical, Initiative, Assistance) are Management's "
+         "reference data, protected against editing. The blue-header "
+         "sheets are yours to fill in. Most grey-header sheets refresh "
+         "from Management's data (Data > Refresh All) rather than being "
+         "sent out fresh each time — as a Centre Lead you won't normally "
+         "need to do this yourself.", None, False),
         ("", None, False),
         ("How to use this workbook", 12, True),
         ("1. 'Step 1 - Teams' — list every team this centre has, whether it "
@@ -228,21 +244,45 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
         "CentreName", attr_text=f"Instructions!$B${centre_name_row}")
     wb.defined_names["CentreCode"] = DefinedName(
         "CentreCode", attr_text=f"Instructions!$B${centre_code_row}")
+
+    # A one-row Table, not a plain cell: Power Query's standard parameter
+    # pattern is Excel.CurrentWorkbook(){[Name="Config"]}[Content]{0}[PrepFilePath]
+    # — a named Table survives being moved around the sheet; a hardcoded
+    # cell address doesn't. Read by wire_reference_data.py's queries (run
+    # as stage 2, after this file is saved) so Management can repoint this
+    # workbook at wherever preparation.xlsx currently lives — e.g. after
+    # moving it to a shared drive — by editing this one cell and hitting
+    # Data > Refresh All, with no Python involved. Same pattern already
+    # used by management/consolidation/build_consolidation.py's
+    # SourceFolder config.
+    r += 1
+    config_header_row = r
+    style_header(ws.cell(row=config_header_row, column=1, value="PrepFilePath"))
+    style_body(ws.cell(row=config_header_row + 1, column=1,
+                        value=str(Path(prep_path).resolve())), editable=True)
+    tab = Table(displayName="Config", ref=f"A{config_header_row}:A{config_header_row + 1}")
+    tab.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
+    ws.add_table(tab)
+
     ws.protection.sheet = True
 
     # ================================================================= Reference sheets (read-only)
-    def copy_ref(sheet_name, col_widths, protect=True):
-        headers, rows = read_table(src, sheet_name)
-        ws = wb.create_sheet(sheet_name)
-        write_reference_table(ws, sheet_name, 1, headers, rows, col_widths, protect=protect)
-        return headers, rows
-
-    copy_ref("Centres", [6, 26, 12])
-    copy_ref("Position", [26, 14, 10, 8, 12])
-    copy_ref("ProblemSet", [6, 28, 14, 18])
-    copy_ref("InitiativeType", [6, 32, 14, 18, 18])
-    copy_ref("AssistanceType", [6, 28, 14, 18, 18])
-
+    # Centres, Position, ProblemSet, InitiativeType, AssistanceType,
+    # Resources, Priority (split 3 ways), and the Tactical/Initiative/
+    # Assistance scoring tables are NOT built here as static openpyxl
+    # copies any more (2026-09-01) — that was a "known process gap"
+    # (see CLAUDE.md) against the Process section's original intent of a
+    # live refresh. They're now Power-Query-authored against
+    # preparation.xlsx by templates/scripts/wire_reference_data.py (COM,
+    # same recipe as wire_power_query.py's Consolidation combine queries),
+    # run as a second stage after this script — see that file's docstring
+    # for the full recipe, the Priority-split rationale, and why
+    # RatingLookup deliberately stays a static copy here instead. This
+    # main() call sequence assumes wire_reference_data.py runs before the
+    # workbook is handed to anyone: it creates those sheets and their
+    # dependent named ranges (ResourceNameList; Tactical/Initiative/
+    # Assistance for the Step 2 dependent dropdown), none of which exist
+    # yet at the point this function returns.
     rl_headers, rl_rows = read_table(src, "RatingLookup", header_row=3)
     ws = wb.create_sheet("RatingLookup")
     write_reference_table(ws, "RatingLookup", 1, rl_headers, rl_rows,
@@ -250,73 +290,6 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     for i, row in enumerate(rl_rows):
         ws.cell(row=2 + i, column=7).fill = PatternFill("solid", fgColor=row[5])
     ws.column_dimensions["G"].width = 4
-
-    res_headers, res_rows = read_table(src, "Resources")
-    ws = wb.create_sheet("Resources")
-    # FullName is a real formula, not a hardcoded value, and doubles as the
-    # picker source for Step 3.
-    for i, h in enumerate(res_headers):
-        style_header(ws.cell(row=1, column=1 + i, value=h), ref=True)
-    style_header(ws.cell(row=1, column=len(res_headers) + 1, value="FullName"), ref=True)
-    for r_off, row in enumerate(res_rows):
-        row_num = 2 + r_off
-        for c_off, val in enumerate(row):
-            style_body(ws.cell(row=row_num, column=1 + c_off, value=val))
-        style_body(ws.cell(row=row_num, column=len(res_headers) + 1,
-                            value=f"=A{row_num}&\" \"&B{row_num}"))
-    last_res_row = 1 + len(res_rows)
-    tab = Table(displayName="Resources", ref=f"A1:D{last_res_row}")
-    tab.tableStyleInfo = TableStyleInfo(name="TableStyleMedium3", showRowStripes=True)
-    ws.add_table(tab)
-    for col, w in zip("ABCD", [16, 16, 26, 26]):
-        ws.column_dimensions[col].width = w
-    ws.sheet_view.showGridLines = False
-    ws.protection.sheet = True
-    wb.defined_names["ResourceNameList"] = DefinedName(
-        "ResourceNameList", attr_text=f"Resources!$D$2:$D${last_res_row}")
-
-    # Priority: re-sorted so each Type is a contiguous block (needed for the
-    # dependent-dropdown named ranges below).
-    pr_headers, pr_rows = read_table(src, "Priority")
-    type_order = {"Tactical": 0, "Initiative": 1, "Assistance": 2}
-    pr_rows_sorted = sorted(pr_rows, key=lambda row: type_order.get(row[1], 99))
-    ws = wb.create_sheet("Priority")
-    write_reference_table(ws, "Priority", 1, pr_headers, pr_rows_sorted,
-                           [42, 12, 10, 12])
-    type_bounds = {}
-    start = 2
-    for t in ("Tactical", "Initiative", "Assistance"):
-        count = sum(1 for row in pr_rows_sorted if row[1] == t)
-        type_bounds[t] = (start, start + count - 1)
-        start += count
-    for t, (first, last) in type_bounds.items():
-        wb.defined_names[t] = DefinedName(t, attr_text=f"Priority!$A${first}:$A${last}")
-
-    # Table displayName must differ from the sheet name here: the sheet
-    # names "Tactical"/"Initiative"/"Assistance" are also used as workbook
-    # defined names (for the dependent-dropdown INDIRECT() trick below,
-    # via type_bounds). A Table's displayName occupies the same name
-    # namespace as a defined name in OOXML — reusing it made Excel's
-    # repair silently DELETE the Table (ListObjects came back empty on
-    # reopen via COM, confirmed) with no other symptom to point at it.
-    for sheet_name, table_name, widths, bands, label_col_letter in (
-        ("Tactical", "TacticalScores", [42, 10, 26, 8, 10, 11, 11, 13, 9, 11, 12, 10], RISK_BANDS, "K"),
-        ("Initiative", "InitiativeScores", [34, 10, 30, 16, 9, 10, 7, 8, 11, 13, 10], VALUE_BANDS, "J"),
-        ("Assistance", "AssistanceScores", [34, 10, 26, 16, 10, 12, 9, 8, 11, 13, 10], VALUE_BANDS, "J"),
-    ):
-        headers, rows = read_table(src, sheet_name)
-        ws = wb.create_sheet(sheet_name)
-        last_row = write_reference_table(ws, table_name, 1, headers, rows, widths)
-        # FormulaRule, not CellIsRule: a CellIsRule text-equality rule here
-        # (structurally valid XML, verified by hand) still made Excel flag
-        # these tables for repair on open. FormulaRule is the pattern
-        # already proven safe on Step 1's Priority Allocation Total column.
-        for band_name, colour in bands:
-            ws.conditional_formatting.add(
-                f"{label_col_letter}2:{label_col_letter}{last_row}",
-                FormulaRule(formula=[f'{label_col_letter}2="{band_name}"'],
-                            fill=PatternFill("solid", fgColor=colour, bgColor=colour))
-            )
 
     # ================================================================= Lookups (small enums, editable-free)
     ws = wb.create_sheet("Lookups")
@@ -614,16 +587,13 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
         )
     ws.freeze_panes = "A2"
 
-    # Tab order follows the data model / left-to-right reading order: each
-    # type-specific lookup sits immediately before the scoring table that
-    # consumes it (ProblemSet->Tactical, InitiativeType->Initiative,
-    # AssistanceType->Assistance); RatingLookup goes last since all three
-    # scoring tables share it rather than it belonging to one. The Step
-    # 1-3 entry sheets stay last, in the Centre Lead's actual workflow
-    # order.
-    SHEET_ORDER = ["Instructions", "Centres", "Position", "Resources", "Priority",
-                   "ProblemSet", "Tactical", "InitiativeType", "Initiative",
-                   "AssistanceType", "Assistance", "RatingLookup", "Lookups",
+    # Final tab order (interleaving the Power-Query-authored reference
+    # sheets from wire_reference_data.py with these) is set there, once
+    # those sheets exist — same split as create_pivots.py owning
+    # Consolidation's final sheet order. Here, just put what this stage
+    # actually built in a sane order for anyone opening the file between
+    # the two stages.
+    SHEET_ORDER = ["Instructions", "RatingLookup", "Lookups",
                    "Step 1 - Teams", "Step 2 - Priorities & Ranking",
                    "Step 3 - Resource Allocation"]
     wb._sheets = [wb[name] for name in SHEET_ORDER]

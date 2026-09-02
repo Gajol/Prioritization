@@ -20,12 +20,19 @@ INF's "Ops Team" rows will get merged and their FTE sums will be wrong (see
 expected values below).
 
 Usage:
-    python make_test_centres.py <preparation.xlsx>
+    1. Have Excel running (any workbook, or none) -- wire_fixture() drives
+       it via COM (GetActiveObject) to open each fixture itself.
+    2. python make_test_centres.py <preparation.xlsx>
 
-Then, with each output file open in Excel:
-    python ../../../templates/scripts/wire_data_model.py Centre-CYB.xlsx
-    (etc. for ECO, INF)
-    python ../../../scripts/check_errors_excel.py Centre-CYB.xlsx
+Runs the full real pipeline for each fixture: build_centre_template.main()
+(stage 1 shell) -> fill_fixture() (openpyxl, writes the Step 1-3 data
+directly rather than simulating UI entry) -> wire_reference_data.py
+(stage 2, authors the Power-Query reference sheets) -> wire_data_model.py
+(Power Pivot Data Model). A fixture isn't realistic without stages 2/3,
+since build_centre_template.py alone no longer creates the reference
+sheets Step 2's formulas depend on (TacticalScores/InitiativeScores/
+AssistanceScores, etc.) -- see templates/scripts/wire_reference_data.py's
+docstring.
 
 Expected hand-computed values (Allocation % of Person Effort := SUM per team;
 FTE Delivered to Priority := that sum x Allocation % of Team Effort):
@@ -48,12 +55,16 @@ FTE Delivered to Priority := that sum x Allocation % of Team Effort):
     set is designed to catch.)
 """
 import sys
+import time
 from pathlib import Path
 
 import openpyxl
+import win32com.client as win32
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "templates" / "scripts"))
 from build_centre_template import main as build_centre, read_table  # noqa: E402
+import wire_reference_data  # noqa: E402
+import wire_data_model  # noqa: E402
 
 OUT_DIR = Path(__file__).resolve().parent / "output"
 
@@ -139,6 +150,18 @@ def fill_fixture(out_path, teams, priorities, allocations):
     wb.save(out_path)
 
 
+def wire_fixture(out_path):
+    """Stages 2/3 via COM: Power-Query reference sheets + Data Model."""
+    xl = win32.GetActiveObject("Excel.Application")
+    xl.DisplayAlerts = False
+    wb = xl.Workbooks.Open(str(out_path))
+    wire_reference_data.main(wb.Name)
+    xl.CalculateFullRebuild()
+    time.sleep(1)
+    wire_data_model.main(wb.Name)
+    wb.Close(SaveChanges=False)
+
+
 def main(prep_path):
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     _, centres_rows = read_table(openpyxl.load_workbook(prep_path, data_only=True), "Centres")
@@ -148,6 +171,7 @@ def main(prep_path):
         out_path = OUT_DIR / f"Centre-{code}.xlsx"
         build_centre(prep_path, str(out_path), centre_name=names_by_code[code], centre_code=code)
         fill_fixture(out_path, teams, priorities, allocations)
+        wire_fixture(out_path)
         print(f"fixture ready: {out_path}")
 
 

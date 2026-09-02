@@ -158,24 +158,34 @@ Write these as Markdown in `/docs`:
   excel-file-design.md for the full writeup.
 - `templates/centre-template.xlsx` — Centre Lead data-entry workbook
   (Teams, Priorities & Ranking, Resource Allocation), native Excel
-  validation only, no VBA. Embeds read-only copies of all 11 reference
-  tables from preparation.xlsx and shares its data model — same table
-  names/columns. Wired into its own Power Pivot Data Model — 15/17
-  relationships live, permanently: the 2 involving Teams can never be
-  created, by design (see the RESOLVED entry below on Step 1 - Teams
-  becoming a real 15-row Table). Power Pivot rejects a relationship
-  whose "one" side key column contains *any* blank, and Teams always has
-  13+ blank rows for any centre with fewer than 15 teams — confirmed via
-  wire_data_model.py against both the unfilled template and filled dev
-  fixtures (management/scripts/dev_fixtures/make_test_centres.py), both
-  landing at 15/17. (An earlier version of this note claimed 17/17 was
-  reachable once real data existed — that was measured against a
-  since-abandoned single-row-Table design; see the RESOLVED entry below
-  for why it was replaced.) Nothing shipped depends on those 2
-  relationships today; see the Resource x Team matrix PivotTable entry
-  further down for the feature that eventually will, and how it'll need
-  to work around this (likely the same Power-Query-filters-blanks
-  approach the Consolidation workbook already uses). Centre Name/Code on
+  validation only, no VBA. Built in 2 stages now (2026-09-01) —
+  build_centre_template.py (shell + RatingLookup + Steps 1-3) then
+  templates/scripts/wire_reference_data.py (the other 10 reference
+  tables, Power-Query-refreshable) — see that RESOLVED entry below for
+  the full story. Shares preparation.xlsx's data model — same table
+  names/columns, except Priority is split 3 ways by Type
+  (PriorityTactical/PriorityInitiative/PriorityAssistance). Wired into
+  its own Power Pivot Data Model — 14/16 relationships live,
+  permanently: the 2 involving Teams can never be created, by design
+  (see the RESOLVED entry below on Step 1 - Teams becoming a real
+  15-row Table). Power Pivot rejects a relationship whose "one" side key
+  column contains *any* blank, and Teams always has 13+ blank rows for
+  any centre with fewer than 15 teams — confirmed via wire_data_model.py
+  against both the unfilled template and filled dev fixtures
+  (management/scripts/dev_fixtures/make_test_centres.py), both landing
+  at 14/16. (Earlier versions of this note claimed first 17/17, then
+  15/17, were reachable — both measured against since-abandoned
+  designs; see the RESOLVED entries below for why each was replaced.
+  The relationship COUNT also changed, 17 -> 16: splitting Priority 3
+  ways removes the single Priorities-Team's-input-table -> Priority
+  relationship, since a Priorities row could belong to any of the 3
+  split tables and Power Pivot can't express an either-or FK target —
+  nothing was using that relationship, so not a functional loss.)
+  Nothing shipped depends on the 2 still-missing Teams relationships
+  today; see the Resource x Team matrix PivotTable entry further down
+  for the feature that eventually will, and how it'll need to work
+  around this (likely the same Power-Query-filters-blanks approach the
+  Consolidation workbook already uses). Centre Name/Code on
   the Instructions sheet are now stamped
   and locked at generation time (build_centre_template.py's `main()`
   takes an optional centre_name/centre_code, validated against
@@ -280,15 +290,87 @@ Write these as Markdown in `/docs`:
 - `/docs` — [`excel-file-design.md`](docs/excel-file-design.md) (design,
   tooling, known gotchas/gaps) and
   [`centre-lead-user-guide.md`](docs/centre-lead-user-guide.md) written.
-- Known process gap (flagged in excel-file-design.md, not yet built):
-  CLAUDE.md's Process section describes a live data-connection refresh
-  from preparation.xlsx when Management clones a centre file; what's
-  actually built is a static snapshot copy baked in at generation time.
-  Now a lower-risk follow-on than it looked: the Consolidation workbook's
-  Power Query combine (wire_power_query.py) proved out the M-authoring-
-  via-COM technique this would need, including the worksheet-Table
-  intermediate step that makes the resulting table nameable/wireable —
-  same recipe should transfer directly.
+- RESOLVED (2026-09-01): the process gap above (CLAUDE.md's Process
+  section described a live data-connection refresh from preparation.xlsx
+  when Management clones a centre file; what was actually built was a
+  static snapshot baked in at generation time, requiring Python +
+  redistribution for every reference-data change) is now built — see
+  `templates/scripts/wire_reference_data.py`. Driven by a portability
+  requirement: Management will run these files with no Python access at
+  all, so Python can only ever be a build-time tool on a machine Claude
+  Code has access to (see CLAUDE.md's Technology constraints #5) —
+  routine reference-data changes needed an Excel-only path.
+  `centre-template.xlsx` build is now 2 stages, same split the
+  Consolidation workbook already used: build_centre_template.py (shell:
+  RatingLookup + Lookups + Instructions + Steps 1-3) then
+  wire_reference_data.py (COM, authors Power Query connections from the
+  other 10 reference tables back to preparation.xlsx, loads each to a
+  worksheet Table, restyles it, wires the dependent-dropdown/picker
+  defined names). Once built, updating reference data is Excel-only end
+  to end: Management edits preparation.xlsx directly (always was
+  possible) and hits Data > Refresh All on the distributed file — no
+  Python, no redistribution, for any change that's just new/edited rows.
+  Structural changes (new column, new Priority Type, new dropdown) still
+  need a Python regeneration + redistribution, same as before — that
+  residual scope is much smaller than routine data updates in practice.
+  RatingLookup is the deliberate exception, kept as a static Python-
+  authored copy — see wire_reference_data.py's docstring for why (it's a
+  structural constant its own VLOOKUP formulas depend on staying in a
+  fixed row order, converting it would reopen exactly the fragility this
+  whole effort exists to avoid, for a table that in practice never
+  changes).
+  Two non-obvious things had to be redesigned, not just converted, to
+  make this refresh-safe:
+  1. The Priority dependent-dropdown (Step 2's Type -> Priority list) and
+     ResourceNameList (Step 3's resource picker) both depended on
+     defined names pointing at row ranges computed at generation time —
+     refresh-unsafe by construction, since a row count change would
+     silently desync them. Priority is now 3 separate Power Queries
+     split by Type (PriorityTactical/PriorityInitiative/
+     PriorityAssistance, M-filtered), and all the affected defined names
+     are now plain structured references (`PriorityTactical[Title]`,
+     `Resources[FullName]`) that auto-size with their table on every
+     refresh — no row math, anywhere.
+  2. Sheet protection blocks a Table from growing or shrinking on
+     refresh, exactly like the already-documented "Table can't resize
+     while its sheet is protected" constraint for Step 1 - Teams (below)
+     — confirmed by direct testing, including with
+     AllowInsertingRows/AllowDeletingRows/AllowFormattingCells all
+     explicitly granted (still failed identically). So these 10-turned-
+     12 reference sheets (Priority's split makes it 12) are deliberately
+     left unprotected — matching the precedent the Consolidation
+     workbook's own Power-Query-loaded sheets already set
+     (wire_power_query.py never protected them either). No password was
+     ever set on these sheets; protection was only ever a guard against
+     an accidental Centre Lead typo, and any accidental edit gets
+     overwritten by the next refresh regardless.
+  Verified (2026-09-01): a live add-a-row-to-preparation.xlsx-then-
+  Refresh-All test on a wired centre file showed the new row appearing
+  in the right split Priority table and its defined name within seconds,
+  with zero formula errors across the whole workbook afterward; the same
+  test against the *protected* design failed silently (RefreshAll
+  swallowed the per-connection error) until sheets were made
+  unprotected. Re-ran the dev-fixture + Consolidation regression
+  end-to-end against fixtures rebuilt through the full 3-stage pipeline
+  (make_test_centres.py now runs wire_reference_data.py + wire_data_model.py
+  on each fixture too, not just stage 1) — all 5 hand-computed FTE
+  values and the ECO/INF collision case still matched exactly.
+  All 6 real per-centre files now live in `management/centres/`
+  (Centre-CYB/ECO/INF/HLT/ENV/DIP.xlsx), built and wired through the
+  full pipeline, 14/16 relationships each, zero formula errors.
+  Gotcha for next time: `ListObjects.Add(SourceType=0, ...)` for a new
+  Power-Query connection intermittently failed with a blank, contentless
+  COM error after many rapid successive query-author attempts in one
+  long-running Excel session (reproduced even for a trivial literal
+  query with no external source at all, and even in the
+  already-proven-working Consolidation workbook) — resolved every time
+  by closing all open workbooks in that Excel session and retrying, no
+  code change involved. Looked exactly like an environment regression at
+  first (a completely unmodified, previously-working script failed
+  identically); turned out to be Excel/Mashup-engine session staleness
+  from heavy iteration, not a real bug. If this recurs, close all
+  workbooks (not just the one being wired) before assuming the recipe
+  itself is broken.
 - RESOLVED (2026-09-01): the RatingLookup-driven band formulas
   (`band_formulas()` in build_preparation.py) used INDEX/MATCH rather than
   VLOOKUP, which cut against maintainability by an intermediate Excel

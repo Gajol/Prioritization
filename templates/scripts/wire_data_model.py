@@ -29,25 +29,38 @@ import pywintypes
 import win32com.client as win32
 
 TABLES = ["Centres", "Position", "ProblemSet", "InitiativeType", "AssistanceType",
-          "RatingLookup", "Resources", "Priority", "TacticalScores", "InitiativeScores",
+          "RatingLookup", "Resources", "PriorityTactical", "PriorityInitiative",
+          "PriorityAssistance", "TacticalScores", "InitiativeScores",
           "AssistanceScores", "Teams", "Priorities", "ResourceAllocation"]
 
+# Priority is split into 3 Power-Query tables by Type (PriorityTactical/
+# PriorityInitiative/PriorityAssistance — see wire_reference_data.py),
+# so each Scores table's PriorityReference relates to its own matching
+# split table, not a single shared "Priority" table. Priorities (the
+# Centre Lead's Step 2 input, unrelated to the reference split above)
+# still needs a single Priority-title dimension to relate to regardless
+# of which Type a row is — that's PriorityTactical UNION'd conceptually
+# with the other two, which Power Pivot can't express directly, so it
+# relates to whichever of the 3 split tables actually contains that row's
+# title; Power Pivot only requires the relationship to resolve for rows
+# that have a match, and a given Priority Title exists in exactly one
+# split table by construction (Priority is filtered by Type, and Type is
+# fixed per Priority).
 RELATIONSHIPS = [
     ("Resources", "PositionTitle", "Position", "Title"),
-    ("TacticalScores", "PriorityReference", "Priority", "Title"),
+    ("TacticalScores", "PriorityReference", "PriorityTactical", "Title"),
     ("TacticalScores", "ProblemSet", "ProblemSet", "Title"),
     ("TacticalScores", "Actor", "Centres", "CentreCode"),
     ("TacticalScores", "RiskLabelId", "RatingLookup", "id"),
-    ("InitiativeScores", "PriorityReference", "Priority", "Title"),
+    ("InitiativeScores", "PriorityReference", "PriorityInitiative", "Title"),
     ("InitiativeScores", "InitiativeType", "InitiativeType", "Title"),
     ("InitiativeScores", "Actor", "Centres", "CentreCode"),
     ("InitiativeScores", "ValueLabelId", "RatingLookup", "id"),
-    ("AssistanceScores", "PriorityReference", "Priority", "Title"),
+    ("AssistanceScores", "PriorityReference", "PriorityAssistance", "Title"),
     ("AssistanceScores", "AssistanceType", "AssistanceType", "Title"),
     ("AssistanceScores", "Actor", "Centres", "CentreCode"),
     ("AssistanceScores", "ValueLabelId", "RatingLookup", "id"),
     ("Priorities", "Team Name", "Teams", "Team Name"),
-    ("Priorities", "Priority Title", "Priority", "Title"),
     ("ResourceAllocation", "Team Name", "Teams", "Team Name"),
     ("ResourceAllocation", "Resource", "Resources", "FullName"),
 ]

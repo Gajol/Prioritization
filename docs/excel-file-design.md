@@ -237,22 +237,130 @@ change). Verified via a full Excel recalculation with no formula errors in
 any Tactical/Initiative/Assistance band column, and spot-checked computed
 values against hand-expected bands.
 
-## Process gap: static snapshot vs. live refresh
+## Resolved: static snapshot vs. live refresh (2026-09-01)
 
 CLAUDE.md's Process section describes Management "ensuring the data is refreshed
 (data connection to the preparation phase Excel file)" when cloning a centre file
-from the template. **That's not what's built today.** `centre-template.xlsx`'s
-reference sheets are a **static, point-in-time copy** of `preparation.xlsx`'s data,
-baked in by `build_centre_template.py` at generation time — not a live, refreshable
-Power Query connection to the Preparation workbook. If Management updates Priorities
-or Resources after templates have already been cloned/distributed, those clones
-won't see the change without being regenerated.
+from the template. Until 2026-09-01 that wasn't what was built: `centre-template.xlsx`'s
+reference sheets were a **static, point-in-time copy** of `preparation.xlsx`'s data,
+baked in by `build_centre_template.py` at generation time. If Management updated
+Priorities or Resources after templates had already been distributed, those clones
+wouldn't see the change without a full Python regeneration and redistribution.
 
-Building a real live-refresh connection (Power Query pointed at
-`preparation.xlsx`, refreshed per-clone) is a reasonable next step, but wasn't done
-here — flagging it rather than quietly leaving the gap undocumented. (The Power
-Query technique now proven out for the Consolidation workbook below would make this
-a lower-risk follow-on than it looked before that work.)
+The motivating constraint: Management runs these files with **no Python access at
+all** (CLAUDE.md's Technology constraints #5) — Python only ever runs where Claude
+Code has access to it. So any fix had to land as something Excel can do on its own.
+The Consolidation workbook's Power Query combine (`wire_power_query.py`, below)
+had already proven the M-authoring-via-COM technique this needed, including the
+worksheet-Table intermediate step that makes a Power-Query-loaded table nameable
+and wireable into the Data Model — so this was a lower-risk follow-on than it first
+looked.
+
+**What's built**: `centre-template.xlsx` is now generated in 2 stages, the same
+split the Consolidation workbook already uses.
+
+1. `build_centre_template.py` — the shell: Instructions (now including a `Config`
+   Table with a `PrepFilePath` cell, same one-row-Table-not-a-plain-cell pattern
+   Consolidation's `SourceFolder` config uses, and for the same reason — a named
+   Table survives being moved around the sheet, a hardcoded cell address doesn't),
+   RatingLookup (still a static copy — see below for why), the small hardcoded
+   `Lookups` enum sheet, and Steps 1-3.
+2. `templates/scripts/wire_reference_data.py` — COM against a running Excel,
+   authors a Power Query per remaining reference table
+   (`Excel.Workbook(File.Contents(PrepFilePath), null, true){[Item="X",Kind="Table"]}[Data]`,
+   reading `PrepFilePath` from the Config Table via
+   `Excel.CurrentWorkbook(){[Name="Config"]}[Content]{0}[PrepFilePath]`), loads each
+   to a worksheet Table via the same `ListObjects.Add(SourceType=0, Source=<OLEDB
+   Mashup connection string>, ...)` recipe `wire_power_query.py` uses, and restyles
+   it (header fill/font, column widths, gridlines) to match the rest of the
+   workbook. Centres, Position, ProblemSet, InitiativeType, AssistanceType,
+   Resources, and the Tactical/Initiative/Assistance scoring tables (renamed
+   TacticalScores/InitiativeScores/AssistanceScores, same collision-avoidance
+   reason as always — see "Structured references" below) all convert this way.
+
+Once built, a routine reference-data change (new Priority, new Resource, an
+updated rating colour) is Excel-only, start to finish: Management edits
+`preparation.xlsx` directly (always was possible — it's a plain workbook, not
+generated fresh each time) and hits **Data > Refresh All** on the distributed
+file. No Python, no redistribution. A *structural* change (new column, new
+Priority Type, a new dropdown) still needs a Python regeneration and
+redistribution — but that's now the much smaller slice of what actually changes
+quarter to quarter.
+
+**RatingLookup is the deliberate exception** — still a static Python-authored
+copy, not converted. It's a structural constant (3 RatingTypes × 5 bands, in
+that exact grouped order) that `build_preparation.py`'s VLOOKUP band-lookup
+formulas (`Likelihood_MinTable`/`Risk_MinTable`/`Value_MinTable`, see "Resolved:
+INDEX/MATCH readability" above) depend on staying in that fixed order and row
+count. Converting it to a live query would reopen that exact fragility for a
+table that, in practice, essentially never changes — not worth it.
+
+**Two things needed redesigning, not just converting**, because they depended on
+row positions fixed at generation time — refresh-unsafe by construction, since a
+refresh that changes row counts would silently desync them:
+
+1. **The Priority dependent dropdown** (Step 2's Type → Priority list) and
+   **ResourceNameList** (Step 3's resource picker) both worked via defined names
+   pointing at hardcoded row ranges (`type_bounds` math in the old
+   `build_centre_template.py`, computed once at generation time). Priority is now
+   3 separate Power Queries, split by Type in M
+   (`Table.SelectRows(Data, each [Type] = "Tactical")`, etc.), each loaded to its
+   own small table (`PriorityTactical`/`PriorityInitiative`/`PriorityAssistance`,
+   on their own sheets to avoid any row-growth collision). Every affected defined
+   name is now a plain structured reference (`Tactical` = `PriorityTactical[Title]`,
+   `ResourceNameList` = `Resources[FullName]`) — these auto-size with their table
+   on every refresh, no row math anywhere. Cost: the Power Pivot relationship
+   `Priorities[Priority Title] -> Priority[Title]` that existed when Priority was
+   one table can't be expressed any more (a Priorities row could belong to any of
+   the 3 split tables; Power Pivot has no either-or FK target) — dropped from the
+   relationship list, 17 → 16 total. Nothing was using it.
+2. **Sheet protection blocks a Table from growing or shrinking on refresh** —
+   confirmed by direct testing, the exact same "Table can't resize while its
+   sheet is protected" constraint already found for Step 1 - Teams (see below),
+   just hit via a different code path (a Power Query refresh, rather than manual
+   typing or `ListRows.Add()`). Tried `Worksheet.Protect(AllowInsertingRows=True,
+   AllowDeletingRows=True, AllowFormattingCells=True, ...)` explicitly — failed
+   identically, same "cell or chart you're trying to change is on a protected
+   sheet" error every time. So these reference sheets are deliberately left
+   **unprotected** — matching a precedent the Consolidation workbook's own
+   Power-Query-loaded sheets already set (`wire_power_query.py` never protected
+   `Teams_All (data)` etc. either, for the same reason). No password was ever set
+   on these sheets; protection was only ever a soft guard against an accidental
+   Centre Lead typo, not a security boundary, and any accidental edit gets
+   overwritten by the next refresh regardless — so this trades a soft guardrail
+   for the refresh actually working, which is the entire point.
+
+**Verified end-to-end (2026-09-01)**: added a throwaway row to
+`preparation.xlsx`'s Priority table, hit Refresh All on a wired centre file, and
+confirmed the new row appeared in the correct split Priority table and its
+defined name within seconds — with zero formula errors across the whole
+workbook afterward. Ran the same test against the *protected* version first and
+watched it fail silently (`Workbook.RefreshAll()` swallows individual
+connection-refresh errors — no exception, the table just doesn't grow) before
+finding the real error message by refreshing the specific `QueryTable` directly.
+Re-ran the 3-fixture dev/Consolidation regression through the full 3-stage
+pipeline (`make_test_centres.py` now runs `wire_reference_data.py` +
+`wire_data_model.py` on each fixture, not just stage 1, since a fixture isn't
+functionally complete without them) — all 5 hand-computed FTE values and the
+ECO/INF "Ops Team" collision case still matched exactly. All 6 real per-centre
+files rebuilt through the full pipeline into `management/centres/`
+(`Centre-CYB/ECO/INF/HLT/ENV/DIP.xlsx`), 14/16 relationships each, zero formula
+errors.
+
+**Gotcha for next time**: `ListObjects.Add(SourceType=0, ...)` for a *new*
+Power-Query connection intermittently failed with a blank, contentless COM error
+(`Exception occurred.`, no description) after many rapid successive
+query-authoring attempts within one long-running Excel automation session —
+reproduced even for a trivial literal query with no external source at all
+(`= #table({"A"}, {{1},{2},{3}})`), and even against the Consolidation workbook,
+whose identical recipe was already proven working. Looked exactly like an
+environment regression at first (an unmodified, previously-verified script
+failing identically) — it wasn't. Refreshing an *existing* Power-Query table in
+the same stale session worked fine throughout, isolating the problem to new
+connection creation specifically. Resolved every time by closing all open
+workbooks in that Excel session (`Workbooks.Close`) and retrying — no code
+change involved. If this recurs, close every open workbook (not just the one
+being wired) before concluding the recipe itself is broken.
 
 ## Consolidation workbook
 
@@ -475,7 +583,11 @@ figures exactly).
 # Preparation workbook
 python management/scripts/build_preparation.py management/preparation.xlsx
 
-# Centre Lead template (reads reference data out of preparation.xlsx)
+# Centre Lead template -- stage 1 shell only (RatingLookup + Lookups +
+# Instructions + Steps 1-3). Stage 2 (the other 10 reference tables,
+# Power-Query-refreshable) is wire_reference_data.py, below, and must run
+# before the file is usable -- see "Resolved: static snapshot vs. live
+# refresh" above.
 python templates/scripts/build_centre_template.py management/preparation.xlsx templates/centre-template.xlsx
 
 # One real, stamped centre file (centre-code must match a row in preparation.xlsx's Centres table)
@@ -489,7 +601,8 @@ python templates/scripts/build_centre_template.py management/preparation.xlsx --
 python management/consolidation/build_consolidation.py management/preparation.xlsx management/consolidation/consolidation.xlsx <default-source-folder>
 
 # Dev fixtures — 3 small, hand-checkable "completed" centre files for testing
-# the Consolidation workbook against (gitignored output, not shipped)
+# the Consolidation workbook against (gitignored output, not shipped).
+# Have Excel running first -- this now drives stages 2/3 via COM itself.
 python management/scripts/dev_fixtures/make_test_centres.py management/preparation.xlsx
 ```
 
@@ -506,6 +619,10 @@ Then, with the output file open in Excel:
 
 ```bash
 python management/scripts/wire_data_model.py preparation.xlsx
+
+# Centre Lead template -- stage 2 (Power-Query reference sheets) must run
+# before stage 3 (Data Model), since stage 3 expects those tables to exist
+python templates/scripts/wire_reference_data.py centre-template.xlsx
 python templates/scripts/wire_data_model.py centre-template.xlsx
 
 # Consolidation workbook — run in this order, same open-in-Excel-first pattern
@@ -540,8 +657,12 @@ work (Office Professional Plus). Regenerate/rewire there, then carry the finishe
   (none of which openpyxl can touch), and to verify formulas actually compute
   correctly in Excel itself (`scripts/check_errors_excel.py`).
 - **Power Query** (M) — combines the six centre files in the Consolidation
-  workbook; authored via COM (`management/consolidation/wire_power_query.py`) per
-  the recipe in "Consolidation workbook" above, not hand-typed in the UI.
+  workbook (`management/consolidation/wire_power_query.py`) and, since
+  2026-09-01, pulls 10 of `centre-template.xlsx`'s 11 reference tables live from
+  `preparation.xlsx` (`templates/scripts/wire_reference_data.py`) so Management
+  can update reference data and refresh with no Python involved — see "Resolved:
+  static snapshot vs. live refresh" above. Both authored via COM, not hand-typed
+  in the UI.
 - **DAX** (Data Analysis Expressions) — the Consolidation workbook's measures
   (`management/consolidation/add_measures.py`); see "Consolidation workbook"
   above for the two-hop `FTE Delivered to Priority` reasoning.
