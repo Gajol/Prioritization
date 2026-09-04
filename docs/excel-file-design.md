@@ -639,6 +639,41 @@ Changing a colour is a **structural** change in the sense the Management
 guide uses: it's baked in at generation time, so it needs a regenerate +
 redistribute, not a Refresh All.
 
+## Build stamp and release tagging
+
+Added 2026-09-04. The shipped artefacts are **binary .xlsx files carried to
+a machine with no Python, no git and no repo access**. Git can't diff them,
+so the commit history says nothing useful about a workbook in someone's
+hands, and nothing in the file itself answered "which version is this?".
+
+`config/buildstamp.py` produces `2026-09-04 (7ae039c)` — build date plus
+short commit SHA. Written at generation time into:
+
+- every centre file and the master template (Instructions sheet, locked,
+  and exposed as a **`BuildStamp` defined name**),
+- `consolidation.xlsx` (Instructions sheet).
+
+The trailing `+` in `2026-09-04 (7ae039c+)` means the working tree had
+uncommitted changes when the file was generated. That matters: a stamp
+naming a commit is a lie if the tree had local edits, and these workbooks
+get regenerated constantly during development. Files built for a real
+distribution — from a clean, tagged tree — carry no `+`.
+
+**Why the defined name, not just a visible cell**: Consolidation's Refresh
+Status query reads `BuildStamp` back out of each returned file and shows it
+as a `Built` column. A centre still filling in *last quarter's* template is
+otherwise completely invisible — stale-template data combines perfectly
+happily and every PivotTable looks healthy. Files predating the stamp show
+`(not stamped)`.
+
+**Tagging practice**: tag at **distribution boundaries only** — when files
+actually go out to Centre Leads — not per commit. A quarterly scheme like
+`dist-2026-Q3` matches the collection cycle. Since the binary diff is
+useless, the GitHub Release notes are the real "what changed for Centre
+Leads this quarter" changelog. A tag is only meaningful in combination with
+the in-file stamp above: the tag is how the repo remembers, the stamp is
+how the *file* remembers, and only the second one travels to work.
+
 ## Centre Lead usability pass (2026-09-04)
 
 Nine changes, all native Excel 2021, no VBA.

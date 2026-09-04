@@ -653,3 +653,22 @@ Write these as Markdown in `/docs`:
   BEFORE any `Table.SelectColumns`, since it reads the file's `[Content]`
   blob; selecting columns first made every row fall through to the
   fallback text (it reported three files but named none of them).
+- NEW (2026-09-04): build stamp + release tagging practice.
+  `config/buildstamp.py` yields `2026-09-04 (7ae039c)` (date + short SHA;
+  a trailing `+` marks a build made from a dirty tree, since a stamp
+  naming a commit is a lie if there were local edits). Written into every
+  centre file and the master template (Instructions, locked, AND exposed
+  as a `BuildStamp` defined name) plus consolidation.xlsx. The defined
+  name is the point: Consolidation's Refresh Status query reads it back
+  out of each returned file as a `Built` column, so Management can spot a
+  centre still filling in last quarter's template — otherwise invisible,
+  since stale-template data combines perfectly happily and every
+  PivotTable looks healthy. Files predating this show `(not stamped)`.
+  Rationale: the shipped artefacts are binary .xlsx carried to a machine
+  with no git/network/repo access, so the commit history can't answer
+  "which version is that?" about a file in someone's hands, and git can't
+  diff the binaries either. Agreed practice: tag at DISTRIBUTION
+  boundaries only (e.g. `dist-2026-Q3`), not per commit, with the GitHub
+  Release notes serving as the human-readable changelog the binary diff
+  can't provide. No tag cut yet — today's work is not a distribution
+  boundary; tag when files actually go out to Centre Leads.

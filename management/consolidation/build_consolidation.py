@@ -39,6 +39,9 @@ from build_centre_template import (  # noqa: E402
     FONT, style_header, style_body, read_table, write_reference_table,
 )
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "config"))
+from buildstamp import build_stamp  # noqa: E402
+
 
 def main(prep_path, out_path, default_source_folder=""):
     src = openpyxl.load_workbook(prep_path, data_only=True)
@@ -90,6 +93,11 @@ def main(prep_path, out_path, default_source_folder=""):
             c.alignment = Alignment(wrap_text=True)
             ws.row_dimensions[r].height = 30
         r += 1
+
+    # Same build stamp the centre files carry — see build_centre_template.py.
+    ws.cell(row=r, column=1, value="Workbook build:").font = Font(name=FONT, bold=True)
+    ws.cell(row=r, column=2, value=build_stamp()).font = Font(name=FONT)
+    r += 2
 
     # A one-row Table, not a plain cell: Power Query's standard parameter
     # pattern is Excel.CurrentWorkbook(){[Name="Config"]}[Content]{0}[SourceFolder]

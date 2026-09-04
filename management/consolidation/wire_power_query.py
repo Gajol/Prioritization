@@ -117,9 +117,21 @@ def refresh_status_formula():
             try Text.From(Wbk{[Item="CentreName", Kind="DefinedName"]}[Data]{0}[Column1])
             otherwise "(could not read - is this a centre file?)"
     , type text),
-    WithStamp = Table.AddColumn(WithCentre, "Data as of", each RefreshedAt, type datetime),
-    Ordered = Table.SelectColumns(WithStamp, {"Centre", "Name", "Date modified", "Data as of"}),
-    // (SelectColumns is safe from here on -- Centre is already materialised.)
+    // Which generation of the template this centre is working in. Reading
+    // it here is the whole reason build_centre_template.py exposes it as a
+    // defined name: a centre still filling in last quarter's template is
+    // otherwise invisible -- its data combines perfectly happily. Older
+    // files predating the stamp fall through to "(not stamped)".
+    WithBuild = Table.AddColumn(WithCentre, "Built", each
+        let
+            Wbk = Excel.Workbook([Content], null, true)
+        in
+            try Text.From(Wbk{[Item="BuildStamp", Kind="DefinedName"]}[Data]{0}[Column1])
+            otherwise "(not stamped)"
+    , type text),
+    WithStamp = Table.AddColumn(WithBuild, "Data as of", each RefreshedAt, type datetime),
+    Ordered = Table.SelectColumns(WithStamp, {"Centre", "Name", "Built", "Date modified", "Data as of"}),
+    // (SelectColumns is safe from here on -- Centre/Built are materialised.)
     Renamed = Table.RenameColumns(Ordered, {{"Name", "File"}, {"Date modified", "File last saved"}}),
     Sorted = Table.Sort(Renamed, {{"Centre", Order.Ascending}})
 in
@@ -217,7 +229,7 @@ def main(workbook_name):
             lo.QueryTable.Refresh()
             lo.Name = "RefreshStatus"
             ws.Range("A5").Value = None  # let the query own the body
-            for col, width in (("A", 28), ("B", 30), ("C", 22), ("D", 22)):
+            for col, width in (("A", 28), ("B", 30), ("C", 22), ("D", 22), ("E", 22)):
                 ws.Columns(col).ColumnWidth = width
             # Count sits above the table so it reads before the detail.
             ws.Range("C1").Formula = '=COUNTA(RefreshStatus[File])&" file(s) found"'

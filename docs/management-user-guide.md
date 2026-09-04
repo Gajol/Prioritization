@@ -216,6 +216,22 @@ That's it for the Excel-only path: edit `preparation.xlsx`, then whoever has
 the distributed file (you or the Centre Lead) hits **Data > Refresh All**.
 No new file needed.
 
+## Knowing which version of a workbook you're looking at
+
+Every generated workbook carries a **Workbook build** stamp on its
+Instructions tab, e.g. `2026-09-04 (7ae039c)` — the date it was generated
+plus a short code identifying the exact build. Ask a Centre Lead to quote
+it when they report a problem; it's the only thing that identifies which
+generation of the template they actually have.
+
+You don't have to ask, though: the Consolidation workbook's **Refresh
+Status** tab shows a `Built` column for every returned file. If one centre
+shows an older build than the rest, they're filling in a stale copy of the
+template — worth catching, because their data still combines without
+complaint and nothing else would flag it.
+
+`(not stamped)` means a file generated before this was introduced.
+
 ## Changing the colours (branding / accessibility)
 
 All colour across all three workbooks comes from one file,

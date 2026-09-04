@@ -56,6 +56,7 @@ from openpyxl.utils import get_column_letter
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "config"))
 from theme import load_theme  # noqa: E402
+from buildstamp import build_stamp  # noqa: E402
 
 # Every colour below comes from config/theme.json -- the single source of
 # truth shared with build_preparation.py and build_consolidation.py. Paste
@@ -385,10 +386,28 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     ws.cell(row=r, column=1, value="Centre Code:").font = Font(name=FONT, bold=True)
     style_computed(ws.cell(row=r, column=2, value=centre_code or "EX"))
 
+    # Build stamp: which generation of the template this file came from.
+    # These workbooks travel to a machine with no git, no network and no
+    # repo access, so without this there is no way to answer "which
+    # version is that?" about a file someone is holding. Exposed as a
+    # defined name as well as a visible cell, so the Consolidation
+    # workbook can read it back out of every returned file (see
+    # wire_power_query.py's Refresh Status query) and Management can spot
+    # a centre still working in a stale copy.
+    r += 1
+    build_stamp_row = r
+    ws.cell(row=r, column=1, value="Workbook build:").font = Font(name=FONT, bold=True)
+    style_computed(ws.cell(row=r, column=2, value=build_stamp()))
+    ws.cell(row=r, column=3,
+            value="Quote this if you report a problem with this workbook.").font = Font(
+        name=FONT, italic=True)
+
     wb.defined_names["CentreName"] = DefinedName(
         "CentreName", attr_text=f"Instructions!$B${centre_name_row}")
     wb.defined_names["CentreCode"] = DefinedName(
         "CentreCode", attr_text=f"Instructions!$B${centre_code_row}")
+    wb.defined_names["BuildStamp"] = DefinedName(
+        "BuildStamp", attr_text=f"Instructions!$B${build_stamp_row}")
 
     # A one-row Table, not a plain cell: Power Query's standard parameter
     # pattern is Excel.CurrentWorkbook(){[Name="Config"]}[Content]{0}[PrepFilePath]
