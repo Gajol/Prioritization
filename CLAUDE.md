@@ -311,7 +311,14 @@ Write these as Markdown in `/docs`:
   satisfies CLAUDE.md's Outputs #2-4; #1's ERD sub-requirement was
   previously unmet (no diagrams existed anywhere) and is now covered by
   management-technical-guide.md rather than duplicated into
-  excel-file-design.md.
+  excel-file-design.md. Added 2026-09-04:
+  [`release-and-tagging-guide.md`](docs/release-and-tagging-guide.md) — a
+  beginner-level walkthrough of tagging a quarterly distribution and
+  writing the release notes, written for a Build person new to git tags.
+  Not one of CLAUDE.md's numbered Outputs; it exists because the release
+  notes are the ONLY changelog these binary .xlsx deliverables will ever
+  have (git cannot diff them), which makes writing them a real process
+  step rather than housekeeping.
 - RESOLVED (2026-09-01): the process gap above (CLAUDE.md's Process
   section described a live data-connection refresh from preparation.xlsx
   when Management clones a centre file; what was actually built was a
