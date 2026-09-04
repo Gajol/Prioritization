@@ -212,9 +212,10 @@ def priority_split_formula(priority_type):
         f'    PrepFilePath = {PREP_PATH_M},\n'
         f'    Source = Excel.Workbook(File.Contents(PrepFilePath), null, true),\n'
         f'    Data = Source{{[Item="Priority",Kind="Table"]}}[Data],\n'
-        f'    Filtered = Table.SelectRows(Data, each [Type] = "{priority_type}")\n'
+        f'    Filtered = Table.SelectRows(Data, each [Type] = "{priority_type}"),\n'
+        f'    Sorted = Table.Sort(Filtered, {{{{"Title", Order.Ascending}}}})\n'
         f'in\n'
-        f'    Filtered'
+        f'    Sorted'
     )
 
 
@@ -240,9 +241,10 @@ def resources_formula():
         f'    Resources = Source{{[Item="Resources",Kind="Table"]}}[Data],\n'
         f'    ResourceCentres = Source{{[Item="ResourceCentres",Kind="Table"]}}[Data],\n'
         f'    MyAssociations = Table.SelectRows(ResourceCentres, each [CentreCode] = ThisCentreCode),\n'
-        f'    Filtered = Table.SelectRows(Resources, each List.Contains(MyAssociations[Resource], [FullName]))\n'
+        f'    Filtered = Table.SelectRows(Resources, each List.Contains(MyAssociations[Resource], [FullName])),\n'
+        f'    Sorted = Table.Sort(Filtered, {{{{"FullName", Order.Ascending}}}})\n'
         f'in\n'
-        f'    Filtered'
+        f'    Sorted'
     )
 
 

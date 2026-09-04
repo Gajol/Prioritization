@@ -540,3 +540,37 @@ Write these as Markdown in `/docs`:
   Consolidation regression (5 hand-computed FTE values + Total FTE) still
   matched exactly after the full regeneration, since none of it touches
   Resources scoping.
+- FIXED (2026-09-04), reported by a Centre Lead: the Team Name (Steps 3/4)
+  and Priority Title (Step 3) dropdowns in `templates/centre-template.xlsx`
+  were showing several blank entries below the real choices, and were
+  listed in whatever order they were typed rather than alphabetically.
+  Root cause: `TeamNameList`/`Selected{Type}` pointed straight at the
+  growable-in-place `Teams`/`PrioritySelection` input Tables (15 and 200
+  rows respectively, mostly blank until filled — see the Step 1 - Teams
+  entry above for why they're pre-sized), and a plain Data Validation
+  List shows one dropdown entry per cell including blanks; a comment on
+  the original helper columns claiming Excel silently skips blank cells
+  in a list source was never actually verified and was wrong. Fixed with
+  a new computed helper column per dropdown
+  (`=IFERROR(INDEX(_xlfn.SORT(_xlfn.FILTER(...))),ROW()-1),"")`) that
+  compacts out blanks and sorts what's left, with the `_xlfn.` prefix on
+  SORT/FILTER confirmed required for a plain cell formula written via
+  openpyxl — omitting it doesn't corrupt the formula, it makes Excel
+  refuse to open the file at all (a genuinely new failure mode for this
+  codebase, not the familiar #REF! one). The small literal Lookups enums
+  (Priority Type, Resource Status, Yes/No) are now written pre-sorted;
+  the Power Query-loaded reference tables (Resources, the three
+  Priority split queries) got a one-line `Table.Sort` M step each — no
+  blank-compaction needed there since Power Query tables are always
+  exact-sized. Regenerated and verified zero formula errors on the
+  master template, all 6 real centre files, and all 3 dev fixtures;
+  relationship counts unchanged (13/16 / 14/16). Full write-up, including
+  a live typed-out-of-order verification and the `_xlfn.` isolation test,
+  in excel-file-design.md's "Dropdowns sorted alphabetically and
+  blank-free" section. That same section also documents an unrelated,
+  pre-existing PivotTable staleness quirk found (not caused) while
+  re-running the Consolidation regression — `consolidation.xlsx`'s own
+  PivotTables stopped showing Infrastructure Centre's row after the dev
+  fixtures were regenerated, despite `CUBEVALUE` confirming the Data
+  Model itself has the correct data throughout; left as a known gap for
+  whoever next touches that workbook's PivotTables, not fixed here.

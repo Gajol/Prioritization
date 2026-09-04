@@ -307,19 +307,22 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     ws["A1"].font = Font(name=FONT, bold=True)
     ws["A3"] = "Priority Type"
     ws["A3"].font = Font(name=FONT, bold=True)
-    for i, val in enumerate(["Tactical", "Initiative", "Assistance"]):
+    # Every literal enum list below is written in alphabetical order —
+    # since these are the actual dropdown source cells (not a formula
+    # pointing elsewhere), sorting them is just sorting the list once here.
+    for i, val in enumerate(sorted(["Tactical", "Initiative", "Assistance"])):
         ws.cell(row=4 + i, column=1, value=val).font = Font(name=FONT)
     wb.defined_names["PriorityTypeList"] = DefinedName(
         "PriorityTypeList", attr_text="Lookups!$A$4:$A$6")
     ws["C3"] = "Resource Status"
     ws["C3"].font = Font(name=FONT, bold=True)
-    for i, val in enumerate(["Yes", "No", "Temp"]):
+    for i, val in enumerate(sorted(["Yes", "No", "Temp"])):
         ws.cell(row=4 + i, column=3, value=val).font = Font(name=FONT)
     wb.defined_names["ResourceStatusList"] = DefinedName(
         "ResourceStatusList", attr_text="Lookups!$C$4:$C$6")
     ws["E3"] = "Yes/No"
     ws["E3"].font = Font(name=FONT, bold=True)
-    for i, val in enumerate(["Yes", "No"]):
+    for i, val in enumerate(sorted(["Yes", "No"])):
         ws.cell(row=4 + i, column=5, value=val).font = Font(name=FONT)
     wb.defined_names["YesNoList"] = DefinedName("YesNoList", attr_text="Lookups!$E$4:$E$5")
     ws["G3"] = "Allocation % (5% steps)"
@@ -339,11 +342,13 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     ws = wb.create_sheet("Step 1 - Teams")
     ws.sheet_view.showGridLines = False
     headers = ["Team Name", "Resources Dedicated", "Priority Type",
-               "Priority Allocation Total", "Resource Effort Total (FTE)"]
-    widths = [22, 20, 18, 24, 26]
+               "Priority Allocation Total", "Resource Effort Total (FTE)",
+               "Team Name Sorted"]
+    widths = [22, 20, 18, 24, 26, 22]
     for i, (h, w) in enumerate(zip(headers, widths), start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
         style_header(ws.cell(row=1, column=i, value=h))
+    ws.column_dimensions["F"].hidden = True
 
     # Teams is a real Table spanning all 15 team slots (rows 2-16, CLAUDE.md
     # caps this sheet at 15 teams so it "stays clean") from generation time
@@ -384,11 +389,40 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
             f'=IF($A{r}="","",SUMIFS(ResourceAllocation[Allocation % of Person Effort],'
             f'ResourceAllocation[Team Name],$A{r}))'
         )
+        # Hidden helper: the up-to-15 team names, alphabetised and with the
+        # unused blank slots pushed out entirely, one real team name per
+        # row starting at row 2. FILTER()/SORT() are dynamic-array
+        # functions, but wrapping them in INDEX() to pull a single element
+        # keeps the *result* a plain scalar in each cell — no spill, so
+        # this is just an ordinary (if unusually powerful) cell formula,
+        # not the dynamic-array-as-defined-name approach that was already
+        # tried and confirmed unusable as a direct Data Validation source
+        # (see the note on Selected{Type} below). TeamNameList points at
+        # this column, not at Team Name directly.
+        #
+        # The `_xlfn.` prefix on SORT/FILTER below is required — confirmed
+        # by testing (2026-09-04): a formula openpyxl writes with the bare
+        # function names looks fine in the XML (well-formed, no typo) but
+        # Excel refuses to even Open() the file at all (COM error, no
+        # repair dialog, not the more familiar "silently rewrites to
+        # #REF!" failure mode this codebase hit before). Opening it once
+        # with CorruptLoad/xlRepairFile confirmed Excel's own repair step
+        # was simply deleting these formulas outright. `_xlfn.` alone
+        # (without the `_xlws.` half also needed for a *defined name*
+        # formula — see the Priority Selection section of
+        # excel-file-design.md) was sufficient here since these are plain
+        # cell formulas, not defined names.
+        style_computed(ws.cell(row=r, column=6))
+        ws.cell(row=r, column=6).value = (
+            f'=IFERROR(INDEX(_xlfn.SORT(_xlfn.FILTER($A$2:$A${teams_last_row},'
+            f'$A$2:$A${teams_last_row}<>"")),ROW()-1),"")'
+        )
 
-    tab = Table(displayName="Teams", ref=f"A1:E{teams_last_row}")
+    tab = Table(displayName="Teams", ref=f"A1:F{teams_last_row}")
     tab.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
     ws.add_table(tab)
-    wb.defined_names["TeamNameList"] = DefinedName("TeamNameList", attr_text="Teams[Team Name]")
+    wb.defined_names["TeamNameList"] = DefinedName(
+        "TeamNameList", attr_text="Teams[Team Name Sorted]")
 
     dv_resources = DataValidation(type="list", formula1="=ResourceStatusList", allow_blank=True)
     dv_resources.error = "Choose Yes, No, or Temp."
@@ -448,22 +482,35 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     for r in range(2, last_row + 1):
         style_body(ws.cell(row=r, column=1), editable=True)
         style_body(ws.cell(row=r, column=2), editable=True)
-        # Type-sorted copies of this row's Priority Title, one column per
-        # Type, blank if this row isn't that Type. Plain IF() formulas,
-        # deliberately NOT FILTER(): confirmed by testing (2026-09-03)
-        # that Excel's Data Validation "List" type cannot consume a
-        # dynamic-array (FILTER()-based) defined name at all — fails even
-        # referenced directly with no INDIRECT involved (Validation.Add
-        # itself throws), while the exact same INDIRECT-of-a-defined-name
-        # pattern against a plain static range works fine (proven
-        # elsewhere in this workbook already, e.g. YesNoList). These three
-        # helper columns are what let Step 3's Ranking dropdown filter to
-        # "this row's Type, and only rows actually selected here" using
-        # nothing but that already-proven plain-named-range mechanism.
+        # One column per Type: this Type's selected Priority Titles,
+        # alphabetised, with unselected/wrong-Type/not-yet-used rows
+        # pushed out entirely rather than left as blanks in place. Confirmed
+        # by testing (2026-09-03) that Excel's Data Validation "List" type
+        # cannot consume a dynamic-array (FILTER()-based) defined name at
+        # all when the name itself resolves to a spilling array — fails
+        # even referenced directly with no INDIRECT involved (Validation.Add
+        # itself throws). The fix isn't to avoid FILTER()/SORT() though —
+        # it's to wrap them in INDEX(), which pulls a single element back
+        # out to a plain scalar and never spills, so each cell holds an
+        # ordinary formula result like any other. An earlier version of
+        # this column used a plain IF() per row and left real blanks in
+        # place for non-matching rows, on the theory that Excel's dropdown
+        # silently skips blank cells in a list source — it does not; a
+        # Centre Lead reported the dropdown showing a run of several blank
+        # entries below the real ones, which is exactly what that IF()
+        # produced (an untouched blank for every one of the 200 rows that
+        # wasn't this Type). This INDEX/SORT/FILTER version compacts those
+        # away instead of just hiding them individually. See the matching
+        # `_xlfn.` note on Step 1 - Teams' own sorted helper column above —
+        # same requirement applies here, for the same reason.
         for col, ptype in ((3, "Tactical"), (4, "Initiative"), (5, "Assistance")):
             cell = ws.cell(row=r, column=col)
             style_computed(cell)
-            cell.value = f'=IF($A{r}="{ptype}",$B{r},"")'
+            cell.value = (
+                f'=IFERROR(INDEX(_xlfn.SORT(_xlfn.FILTER($B$2:$B${last_row},'
+                f'($A$2:$A${last_row}="{ptype}")*($B$2:$B${last_row}<>""))),'
+                f'ROW()-1),"")'
+            )
 
     tab = Table(displayName="PrioritySelection", ref=f"A1:E{last_row}")
     tab.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
@@ -503,13 +550,15 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
 
     # Selected-and-Type-filtered lists for Step 3's Ranking dropdown below.
     # Structured references, same proven pattern as TeamNameList
-    # (`Teams[Team Name]`) — a defined name built on a structured reference
-    # works fine as a Data Validation list source; it's only a structured
-    # reference typed *directly* into a DataValidation formula that breaks
-    # (see the note on dv_unique_team). Blanks in the helper column (rows
-    # of a different Type, or not-yet-used rows) are simply skipped by
-    # Excel's dropdown — no IFERROR/empty-fallback needed here, unlike the
-    # FILTER() attempt this replaced.
+    # (`Teams[Team Name Sorted]`) — a defined name built on a structured
+    # reference works fine as a Data Validation list source; it's only a
+    # structured reference typed *directly* into a DataValidation formula
+    # that breaks (see the note on dv_unique_team). The helper columns
+    # themselves are already alphabetised and blank-compacted (see the
+    # INDEX/SORT/FILTER note on the loop above) — a raw list-type range
+    # does NOT skip blank cells, it shows one dropdown entry per cell
+    # including the blank ones, which is what the original IF()-only
+    # version of this column actually did in practice.
     for ptype, col_name in (("Tactical", "Tactical Helper"),
                              ("Initiative", "Initiative Helper"),
                              ("Assistance", "Assistance Helper")):

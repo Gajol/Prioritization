@@ -29,6 +29,10 @@ there. If they look wrong, tell Management before you start entering data.
   someone's missing, tell Management, don't try to add them yourself.
   Same for a missing person/position/priority anywhere else here.
 - **Blue-header tabs** are yours: Step 1, Step 2, Step 3, Step 4.
+- Every dropdown is alphabetical and only shows real choices — no blank
+  entries below the real ones. A team or priority you just added won't
+  necessarily appear at the *bottom* of its dropdown; it'll be wherever
+  it falls alphabetically.
 
 ## Step 1 — Teams
 

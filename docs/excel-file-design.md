@@ -495,6 +495,108 @@ deliberately stays the full, unfiltered list (`build_consolidation.py`
 unchanged) — Management needs to see every person for reporting, not one
 centre's slice.
 
+## Dropdowns sorted alphabetically and blank-free (2026-09-04)
+
+A Centre Lead reported the Team Name and Priority Title dropdowns (Steps
+3 and 4) showing a run of several blank entries below the real choices.
+Root cause: `TeamNameList` pointed straight at `Teams[Team Name]` (a real,
+full-size 15-row Table — see the Step 1 - Teams entry in CLAUDE.md for why
+it's pre-sized rather than grown on demand) and `Selected{Type}` pointed
+at `PrioritySelection`'s per-Type helper columns (a 200-row Table, same
+reason). Both are genuinely growable-in-place input tables, so most rows
+are blank until a Centre Lead fills them — and a plain Data Validation
+List source shows one dropdown entry per cell in its range, blank cells
+included, not just the filled ones. A comment on the original helper
+columns claimed "Excel's dropdown silently skips blank cells" — that
+claim was never actually verified and turned out to be wrong; this is
+what it looked like once someone hit the 200-row version of it.
+
+**Fix**: both `TeamNameList` and each `Selected{Type}` now point at a new
+computed helper column instead of the raw input column directly:
+
+```
+=IFERROR(INDEX(_xlfn.SORT(_xlfn.FILTER(<range>,<condition>)),ROW()-1),"")
+```
+
+FILTER() compacts out the blanks (and, for the Priority Selection sheet,
+the wrong-Type rows too, in the same step); SORT() alphabetises what's
+left; INDEX() pulls a single element back out to a plain scalar, one per
+row, so the cell never spills — it's an ordinary formula result like any
+other, not the dynamic-array-as-defined-name approach the Priority
+Selection section above already ruled out for Data Validation List
+sources. `TeamNameList`/`Selected{Type}` are structured references over
+these new columns (`Teams[Team Name Sorted]`,
+`PrioritySelection[Tactical Helper]` etc., column formulas changed but
+names kept), same proven pattern as before.
+
+**The `_xlfn.` prefix is required, and this was a real, not theoretical,
+finding**: a first attempt wrote these formulas via openpyxl with the
+bare function names (`SORT(...)`, `FILTER(...)`). The XML was well-formed
+and the formula text looked correct, but Excel refused to even `Open()`
+the file — a COM error with no repair dialog, not the more familiar
+"silently rewrites to `#REF!`" failure mode this codebase hit before (see
+the Priority Selection / Step 3 `#REF!` entry in CLAUDE.md). Opening it
+once with `CorruptLoad=xlRepairFile` confirmed Excel's own repair step
+was deleting the formulas outright rather than fixing them. A minimal
+3-way isolation test (no prefix / `_xlfn.` / `_xlfn._xlws.`) confirmed
+`_xlfn.` alone is both necessary and sufficient for a plain *cell*
+formula — unlike the Priority Selection section's finding that a
+*defined name*'s formula text needs the fuller `_xlfn._xlws.` prefix.
+Different contexts, different prefix requirements; test each rather than
+assuming one covers the other.
+
+The small literal enum dropdowns (`PriorityTypeList`, `ResourceStatusList`,
+`YesNoList`) needed no formula trick — they're just a handful of literal
+values on the Lookups sheet, so `build_centre_template.py` now writes them
+pre-sorted (`sorted([...])`) instead of in domain order.
+`PercentIncrementsList` (0%–100% by 5%) was already numerically ascending
+and needed no change.
+
+For the reference tables that are Power Query-loaded rather than
+Centre-Lead-typed (`Resources`, and the three `Priority{Type}` splits),
+sorting is a one-line `Table.Sort(..., {{"<Column>", Order.Ascending}})`
+M step added to `wire_reference_data.py`'s `resources_formula()` and
+`priority_split_formula()` — no blank-compaction needed there since a
+Power Query-loaded table is always sized to its actual row count, never
+padded.
+
+**Verified**: a live test typed 4 team names out of alphabetical order
+and 6 priority selections (mixed Types, reverse order within Type) into a
+freshly regenerated `centre-template.xlsx`, then read the helper columns
+directly — all three came back alphabetised with zero blank rows in
+between, `Validation.Value` confirmed a real entry validates against the
+now-differently-sourced `TeamNameList`, and a whole-workbook error sweep
+came back clean. Regenerated and re-verified (zero formula errors) the
+master template, all 6 real centre files, and all 3 dev fixtures; each
+still lands on its expected relationship count (13/16 for the master
+template's placeholder `EX` code, 14/16 for the six real centres — both
+unchanged from before this fix, since it touches dropdown sourcing, not
+Data Model wiring).
+
+**Found, but not caused by this change, while re-running the Consolidation
+regression**: after regenerating the 3 dev fixtures, `consolidation.xlsx`'s
+"Sum of FTEs by Centre-Team" and "Consolidated Priorities" PivotTables
+stopped showing Infrastructure Centre's row at all, even after repeated
+`RefreshAll()`, explicit `PivotCache().Refresh()` calls (individually and
+in a loop of 5), and a fully fresh Excel process. A direct `CUBEVALUE`
+against `ThisWorkbookDataModel` — which queries the Data Model directly,
+bypassing any PivotCache — returned the correct values throughout
+(`INF` Total FTE = 0.25, grand total = 3.00), proving the underlying data
+and relationships are fine; only the two PivotTables' cached row-field
+member lists are stale. This is a known category of OLAP/Data-Model
+PivotTable behavior (the set of members for a field can be cached
+separately from the cell values, and `Refresh()` doesn't always force
+re-enumeration) rather than anything introduced by this session's change
+— nothing here touches `consolidation.xlsx`, its build scripts, or its
+Data Model. `create_pivots.py` already sets
+`PivotCache.RefreshOnFileOpen = True`, which is the normal mitigation
+(closing and reopening the file, not just refreshing an already-open
+one), but that didn't clear it here either. Not fixed as part of this
+change — worth a look next time someone touches the Consolidation
+workbook's PivotTables, e.g. recreating the PivotCache from scratch
+instead of refreshing it, or setting
+`MissingItemsLimit = xlMissingItemsNone`.
+
 ## Consolidation workbook
 
 `management/consolidation/consolidation.xlsx` combines the six returned `centre-template.xlsx`
