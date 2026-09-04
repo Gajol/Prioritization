@@ -573,29 +573,35 @@ template's placeholder `EX` code, 14/16 for the six real centres — both
 unchanged from before this fix, since it touches dropdown sourcing, not
 Data Model wiring).
 
-**Found, but not caused by this change, while re-running the Consolidation
-regression**: after regenerating the 3 dev fixtures, `consolidation.xlsx`'s
-"Sum of FTEs by Centre-Team" and "Consolidated Priorities" PivotTables
-stopped showing Infrastructure Centre's row at all, even after repeated
-`RefreshAll()`, explicit `PivotCache().Refresh()` calls (individually and
-in a loop of 5), and a fully fresh Excel process. A direct `CUBEVALUE`
-against `ThisWorkbookDataModel` — which queries the Data Model directly,
-bypassing any PivotCache — returned the correct values throughout
-(`INF` Total FTE = 0.25, grand total = 3.00), proving the underlying data
-and relationships are fine; only the two PivotTables' cached row-field
-member lists are stale. This is a known category of OLAP/Data-Model
-PivotTable behavior (the set of members for a field can be cached
-separately from the cell values, and `Refresh()` doesn't always force
-re-enumeration) rather than anything introduced by this session's change
-— nothing here touches `consolidation.xlsx`, its build scripts, or its
-Data Model. `create_pivots.py` already sets
-`PivotCache.RefreshOnFileOpen = True`, which is the normal mitigation
-(closing and reopening the file, not just refreshing an already-open
-one), but that didn't clear it here either. Not fixed as part of this
-change — worth a look next time someone touches the Consolidation
-workbook's PivotTables, e.g. recreating the PivotCache from scratch
-instead of refreshing it, or setting
-`MissingItemsLimit = xlMissingItemsNone`.
+**False alarm chased at length while re-running the Consolidation
+regression, worth recording so it isn't repeated**: after regenerating the
+3 dev fixtures, an ad-hoc verification script reading `consolidation.xlsx`'s
+"Sum of FTEs by Centre-Team"/"Sum of FTEs by Priority"/"Consolidated
+Priorities" PivotTables appeared to show Infrastructure Centre's row
+missing — persistently, across `RefreshAll()`, explicit
+`PivotCache().Refresh()` (individually and looped 5x), a fully fresh Excel
+process, deleting and recreating all 3 PivotTables/PivotCaches from
+scratch, `Model.Refresh()`, `PivotTable.RefreshTable()`/`.Update()`, and a
+from-scratch minimal repro workbook that appeared to show the same
+"3rd member missing" pattern. `CUBEVALUE`/`CUBEMEMBER` against
+`ThisWorkbookDataModel` returned correct values throughout, and
+`PivotItems` enumeration showed the "missing" member present with
+`Visible = True` — both of which should have been the tell. The actual
+bug: the verification script read each sheet via
+`for r in range(1, used.Rows.Count + 1)`, silently assuming
+`UsedRange` starts at row 1. Both this workbook's pivots and the minimal
+repro placed their `TableDestination` at `A3` (matching
+`create_pivots.py`'s own convention), so `UsedRange` actually started at
+row 3 — the loop above only ever read rows 1–5, missing the pivot's last
+rows (including Infrastructure Centre's data row and the Grand Total row,
+which should have been the giveaway: a Grand Total row never once
+appeared in any of the "missing data" dumps). Reading via
+`used.Row .. used.Row + used.Rows.Count` instead showed every value
+correct all along, including the ECO/INF `Ops Team` collision case
+staying properly separate (0.75 vs 0.25) — there was never a real Data
+Model, relationship, measure, or PivotTable defect here. Lesson for any
+future COM-driven worksheet read in this project: iterate from
+`used.Row`/`used.Column`, never assume `1`.
 
 ## Consolidation workbook
 

@@ -567,10 +567,23 @@ Write these as Markdown in `/docs`:
   relationship counts unchanged (13/16 / 14/16). Full write-up, including
   a live typed-out-of-order verification and the `_xlfn.` isolation test,
   in excel-file-design.md's "Dropdowns sorted alphabetically and
-  blank-free" section. That same section also documents an unrelated,
-  pre-existing PivotTable staleness quirk found (not caused) while
-  re-running the Consolidation regression — `consolidation.xlsx`'s own
-  PivotTables stopped showing Infrastructure Centre's row after the dev
-  fixtures were regenerated, despite `CUBEVALUE` confirming the Data
-  Model itself has the correct data throughout; left as a known gap for
-  whoever next touches that workbook's PivotTables, not fixed here.
+  blank-free" section.
+- CORRECTED (2026-09-04): the same session's initial write-up of this
+  entry claimed a "pre-existing PivotTable staleness quirk" in
+  `consolidation.xlsx` — Infrastructure Centre's row appeared to be
+  missing from 3 of its PivotTables after regenerating the dev fixtures,
+  surviving `RefreshAll()`, looped `PivotCache().Refresh()`, a fresh Excel
+  process, full pivot recreation, `Model.Refresh()`, and a from-scratch
+  minimal repro that seemed to show the identical pattern. That claim was
+  wrong: the verification script itself had the bug, reading each sheet
+  via `for r in range(1, used.Rows.Count + 1)` — an assumption that
+  `UsedRange` starts at row 1, which silently skipped a pivot's last rows
+  whenever `TableDestination` wasn't `A1` (it's `A3` throughout this
+  project's `create_pivots.py`). Every pivot value, including the
+  ECO/INF `Ops Team` collision case, was correct all along; there was no
+  Data Model, relationship, measure, or PivotTable defect. Full
+  after-action writeup in excel-file-design.md's "Dropdowns sorted
+  alphabetically and blank-free" section (same section the wrong claim
+  was originally added to — corrected in place there, kept as a
+  dated correction here rather than silently deleted, per this file's
+  usual convention).
