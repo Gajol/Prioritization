@@ -726,6 +726,62 @@ described this for years while every tab was white); hover prompts on all
 note on `RatingLookup`, the one reference sheet that looks refreshable but
 deliberately isn't.
 
+## Only one Data Validation rule per cell (2026-09-04)
+
+Reported as "the same team can enter the same priority twice on Step 3".
+The obvious fix — add a uniqueness rule to the Priority column — is not
+available, and finding out why turned up a rule that had never worked.
+
+**Excel allows exactly one Data Validation rule per cell.** Adding a second
+to the same range doesn't merge, error, or warn: Excel silently keeps the
+first and discards the rest. `build_centre_template.py` had been doing
+exactly that on Step 2 since the sheet shipped — a list rule
+(`dv_priority_select`) followed by a custom uniqueness rule
+(`dv_unique_priority`, *"Each priority can only be selected once"*) on the
+same `B2:B201`. Confirmed live:
+
+```
+Range("B2").Validation.Type      -> 3   (xlValidateList, not 7/custom)
+Range("B2").Validation.Formula1  -> =INDIRECT($A2)
+```
+
+The uniqueness rule never fired once. Worse than having no rule, since the
+error message implied a guarantee that didn't exist. This is the same
+constraint already documented for the Allocation % columns ("a dropdown
+and a hard 100% block can't coexist in one rule") — it just wasn't
+recognised as the *general* rule it is.
+
+**So duplicates are detected, not blocked.** Conditional formatting has no
+one-rule limit, so both sheets now use the existing `paste_guard()` helper
+to tint the whole offending row, and the Instructions summary counts them
+(6 counters now, up from 4):
+
+- Step 3 — `COUNTIFS(team, team, priority, priority) > 1`, a team listing
+  the same priority twice. This inflates that team's allocation total and
+  double-counts FTE into the priority in the Consolidation workbook, so it
+  matters well beyond tidiness.
+- Step 2 — `COUNTIF(priority, priority) > 1`, replacing the inert rule.
+
+**Rule of thumb for this workbook**: if a cell already has a dropdown, any
+further constraint on it has to be conditional formatting plus a counter,
+never a second validation. Blocking at typing time is only available to
+cells that don't have a list.
+
+## Ranked View colour-coding (2026-09-04)
+
+The Ranked View sheet showed `Value/Risk` as plain grey text, which put the
+risk signal at its least readable on the one sheet built for *reviewing*
+rankings. It now carries the same Type-qualified band rules as Step 3,
+retargeted to its own geometry (data from row 5; Type in column C,
+Value/Risk in column G).
+
+The band-name collision handling is the part that must not be simplified:
+Risk "Minimal" is green (good — low risk) while Value "Minimal" is red
+(bad — low value), so every rule is gated on Type and never on the label
+alone. Verified with a Tactical "Minimal" and an Initiative "Minimal" on
+adjacent rows, reading `DisplayFormat.Interior.Color`: `8109667`
+(green `63BE7B`) and `6711008` (red `E06666`) respectively.
+
 ## Two silent build landmines found while doing the above
 
 Both produced no error anywhere and would have shipped quietly.

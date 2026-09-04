@@ -101,11 +101,18 @@ whichever team that row belongs to, and it spells out the verdict:
 `100% ok`, `80% under`, or `130% over`. A team's priorities should come to
 exactly 100%.
 
+**Don't list the same priority twice for the same team.** Excel can't stop
+you (the Priority column already has a dropdown, and a cell can only carry
+one rule), so instead **both rows turn red** and the Instructions tab counts
+them. It matters: a repeat inflates that team's total and double-counts the
+effort going to that priority.
+
 ## Ranked View
 
 A read-only grey tab that shows your Step 3 rows sorted by team, then by
-rank. Nothing to fill in — it re-sorts itself as you type in Step 3. Use it
-to sanity-check your ordering without disturbing your entry sheet.
+rank, with the Value/Risk column colour-coded exactly as it is in Step 3.
+Nothing to fill in — it re-sorts itself as you type in Step 3. Use it to
+sanity-check your ordering without disturbing your entry sheet.
 
 ## Step 4 — Resource Allocation
 
@@ -159,8 +166,10 @@ a 100%-total check. Use it to sanity-check your ranking, not your allocation.
   duplicating a team name, or a rank within a team, is highlighted **across the
   whole row** so it's hard to miss. The Instructions counters catch it too.
 - **A whole row has turned red** — that row duplicates something it shouldn't:
-  either a team name (Step 1) or a rank within the same team (Step 3). Change one
-  of the two clashing rows.
+  a team name (Step 1), a priority picked twice (Step 2), a rank within the same
+  team, or the same priority listed twice for the same team (Step 3). Both
+  clashing rows go red, so change or delete one of them. The Instructions tab
+  tells you how many there are and which sheet they're on.
 
 ## Sending it back
 

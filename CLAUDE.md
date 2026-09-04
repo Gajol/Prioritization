@@ -679,3 +679,31 @@ Write these as Markdown in `/docs`:
   Release notes serving as the human-readable changelog the binary diff
   can't provide. No tag cut yet — today's work is not a distribution
   boundary; tag when files actually go out to Centre Leads.
+- FIXED (2026-09-04), reported by the user: two Centre Lead workbook
+  defects, plus a third latent one found while investigating.
+  1. Ranked View's `Value/Risk` column was not colour-coded — plain grey
+     text on the one sheet built for REVIEWING rankings. Now carries the
+     same Type-qualified band rules as Step 3, retargeted to its geometry
+     (data from row 5; Type col C, Value/Risk col G). Verified the
+     band-name collision case specifically (Risk "Minimal" green vs Value
+     "Minimal" red, adjacent rows): 8109667 / 6711008 respectively.
+  2. The same team could list the same priority twice on Step 3 —
+     inflating that team's allocation total and double-counting FTE into
+     the priority in Consolidation. Cannot be blocked: see below.
+  3. LATENT, never worked since it shipped: Step 2's "Each priority can
+     only be selected once" Data Validation. **Excel allows exactly ONE
+     Data Validation rule per cell**, and silently keeps the FIRST when
+     more are added — no error, no warning. build_centre_template.py had
+     stacked a custom uniqueness rule after the list rule on the same
+     B2:B201, so the list won and the uniqueness rule was inert.
+     Confirmed live: `Range("B2").Validation.Type` = 3 (xlValidateList),
+     Formula1 `=INDIRECT($A2)`. Worse than no rule, since the error text
+     implied a guarantee that never existed.
+  Fix for 2 and 3: detect, don't block. Conditional formatting has no
+  one-rule limit, so both use the existing `paste_guard()` whole-row tint,
+  and the Instructions summary gained 2 counters (6 total). General rule
+  now documented in excel-file-design.md: if a cell already has a
+  dropdown, any further constraint must be conditional formatting plus a
+  counter, never a second validation — this is the same constraint already
+  known for the Allocation % columns, just not previously recognised as
+  general.

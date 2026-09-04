@@ -347,6 +347,14 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
          'SUMPRODUCT((Priorities[Team Name]<>"")*(Priorities[Rank]<>"")*'
          '(COUNTIFS(Priorities[Team Name],Priorities[Team Name]&"",'
          'Priorities[Rank],Priorities[Rank]&"")>1))'),
+        ("Rows where a team lists the same priority twice", "Step 3",
+         'SUMPRODUCT((Priorities[Team Name]<>"")*(Priorities[Priority Title]<>"")*'
+         '(COUNTIFS(Priorities[Team Name],Priorities[Team Name]&"",'
+         'Priorities[Priority Title],Priorities[Priority Title]&"")>1))'),
+        ("Priorities selected more than once", "Step 2",
+         'SUMPRODUCT((PrioritySelection[Priority Title]<>"")*'
+         '(COUNTIF(PrioritySelection[Priority Title],'
+         'PrioritySelection[Priority Title]&"")>1))'),
         ("People allocated more than 100% of their time", "Step 4",
          'SUMPRODUCT((ResourceAllocation[Resource]<>"")*'
          '(ResourceAllocation[Person Total %]>1))'),
@@ -711,24 +719,24 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     dv_priority_select.errorTitle = "Unknown priority"
     dv_priority_select.promptTitle = "Priority Title"
     dv_priority_select.prompt = (
-        "Pick from Management's master list for the Type you chose. Everything you pick here becomes the shortlist Step 3 offers.")
+        "Pick from Management's master list for the Type you chose. Pick each priority "
+        "only once — a repeat is highlighted in red. Everything you pick here becomes "
+        "the shortlist Step 3 offers.")
     ws.add_data_validation(dv_priority_select)
     dv_priority_select.add(f"B2:B{last_row}")
 
-    # Plain range, not PrioritySelection[Priority Title] — see the note on
-    # dv_unique_team above (structured refs break Data Validation).
-    dv_unique_priority = DataValidation(
-        type="custom",
-        formula1=f'=AND($B2<>"",COUNTIF($B$2:$B${last_row},$B2)=1)',
-        allow_blank=True,
-    )
-    dv_unique_priority.error = "Each priority can only be selected once."
-    dv_unique_priority.errorTitle = "Duplicate priority"
-    dv_unique_priority.promptTitle = "Priority Title"
-    dv_unique_priority.prompt = (
-        "Pick from Management's master list for the Type you chose. Each priority can only appear once on this sheet.")
-    ws.add_data_validation(dv_unique_priority)
-    dv_unique_priority.add(f"B2:B{last_row}")
+    # Duplicate selections are DETECTED, not blocked. A second Data
+    # Validation used to be added to this very range
+    # (type="custom", COUNTIF(...)=1, "Each priority can only be selected
+    # once") and it never once fired: Excel allows exactly ONE rule per
+    # cell and silently keeps the first, so the list rule above won and the
+    # uniqueness rule was inert from the day it shipped. Confirmed live --
+    # Range("B2").Validation.Type returned 3 (xlValidateList) with
+    # Formula1 "=INDIRECT($A2)". It gave false assurance, which is worse
+    # than no rule. Conditional formatting has no such single-rule limit,
+    # so the check moves here and is counted on the Instructions sheet.
+    paste_guard(ws, f"A2:B{last_row}",
+                f'AND($B2<>"",COUNTIF($B$2:$B${last_row},$B2)>1)')
 
     ws.protection.sheet = True
     ws.freeze_panes = "A2"
@@ -897,6 +905,18 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     paste_guard(ws, f"A2:H{last_row}",
                 'AND($A2<>"",$D2<>"",'
                 f'COUNTIFS($A$2:$A${last_row},$A2,$D$2:$D${last_row},$D2)>1)')
+    # The same team listing the same priority twice: not blockable by Data
+    # Validation, because column B already carries the dependent-dropdown
+    # list and Excel allows exactly ONE rule per cell. (Step 2 proved this
+    # the hard way -- it had a second, uniqueness rule stacked on the same
+    # range that Excel silently discarded, so it never fired. See the note
+    # where that was removed.) Detecting it here instead: two rows with the
+    # same team AND the same priority inflate that team's allocation total
+    # and double-count FTE into the priority downstream, so it needs to be
+    # visible even though it can't be prevented at typing time.
+    paste_guard(ws, f"A2:H{last_row}",
+                'AND($A2<>"",$B2<>"",'
+                f'COUNTIFS($A$2:$A${last_row},$A2,$B$2:$B${last_row},$B2)>1)')
 
     ws.protection.sheet = True
     ws.freeze_panes = "A2"
@@ -1021,6 +1041,34 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
             cell.value = f'=IFERROR(INDEX({sorted_array},ROW()-4,{c}),"")'
         ws.cell(row=r, column=4).number_format = "0"
         ws.cell(row=r, column=6).number_format = "0%"
+
+    # Colour the Value/Risk column exactly as Step 3 does. This sheet exists
+    # to REVIEW rankings, so it's the last place the risk signal should be
+    # plain grey text. Geometry differs from Step 3 (data starts at row 5;
+    # Type is column C, Value/Risk column G), but the rules are otherwise
+    # identical -- including the band-name collision handling, which must
+    # be preserved: Risk "Minimal" is green (good, low risk) while Value
+    # "Minimal" is red (bad, low value), so every rule is gated on Type and
+    # never on the label text alone.
+    ranked_first = 5
+    ranked_last = 4 + RANKED_ROWS
+    for band_name, colour, text_colour in RISK_BANDS:
+        ws.conditional_formatting.add(
+            f"G{ranked_first}:G{ranked_last}",
+            FormulaRule(
+                formula=[f'AND($C{ranked_first}="Tactical",$G{ranked_first}="{band_name}")'],
+                fill=PatternFill("solid", fgColor=colour, bgColor=colour),
+                font=Font(name=FONT, color=text_colour))
+        )
+    for band_name, colour, text_colour in VALUE_BANDS:
+        ws.conditional_formatting.add(
+            f"G{ranked_first}:G{ranked_last}",
+            FormulaRule(
+                formula=[f'AND($C{ranked_first}<>"Tactical",$C{ranked_first}<>"",'
+                         f'$G{ranked_first}="{band_name}")'],
+                fill=PatternFill("solid", fgColor=colour, bgColor=colour),
+                font=Font(name=FONT, color=text_colour))
+        )
 
     # RANKED_ROWS is smaller than the 200-row Step 3 Table (recomputing the
     # sort per cell is the cost of not spilling, so this stays bounded).
