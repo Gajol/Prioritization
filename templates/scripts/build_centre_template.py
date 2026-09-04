@@ -66,6 +66,15 @@ from buildstamp import build_stamp  # noqa: E402
 # `python config/theme.py` for the full report).
 THEME = load_theme()
 
+# Computed ONCE at import, deliberately, not per workbook. build_stamp()
+# inspects `git status`, and generating a workbook dirties the tree -- so
+# calling it per file meant the first file in a `--all` run got a clean
+# stamp and the other five got a spurious "+" describing nothing but the
+# run's own output. All files produced by one invocation now share a single
+# stamp taken before anything is written, which is what makes a
+# distribution set internally consistent.
+BUILD_STAMP = build_stamp()
+
 FONT = THEME.font
 N_ROWS = 200
 # How many rows of each 200-row entry Table stay visible by default. The
@@ -405,7 +414,7 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     r += 1
     build_stamp_row = r
     ws.cell(row=r, column=1, value="Workbook build:").font = Font(name=FONT, bold=True)
-    style_computed(ws.cell(row=r, column=2, value=build_stamp()))
+    style_computed(ws.cell(row=r, column=2, value=BUILD_STAMP))
     ws.cell(row=r, column=3,
             value="Quote this if you report a problem with this workbook.").font = Font(
         name=FONT, italic=True)
