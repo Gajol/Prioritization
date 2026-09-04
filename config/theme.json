@@ -1,0 +1,73 @@
+{
+  "_readme": [
+    "Single source of truth for every colour used across all three workbooks.",
+    "Edit this file, re-run the build scripts, redistribute. Nothing here can",
+    "be changed by a Refresh All -- colour is baked in at generation time, so",
+    "a change here is a 'structural change' in the sense used by the",
+    "Management user guide (needs the Build person + redistribution).",
+    "",
+    "Colours accept '#RRGGBB', 'RRGGBB', or 'AARRGGBB'. They are normalised to",
+    "Excel's AARRGGBB form on load, so paste corporate hex codes in directly.",
+    "",
+    "Accessibility: every fill/text pair below is contrast-checked against",
+    "WCAG 2.1 at build time (see accessibility.min_contrast_ratio). If a",
+    "colour you paste in fails, the build stops and tells you which pair and",
+    "what ratio it got -- it will not silently ship an unreadable workbook.",
+    "Band text colours are chosen automatically for best contrast against",
+    "each band fill unless you set 'text' explicitly on that band.",
+    "",
+    "Status colours are additionally paired with Excel icon sets in the",
+    "workbooks, so red/amber/green is never the only signal carrying meaning."
+  ],
+
+  "font": "Arial",
+
+  "cells": {
+    "editable": { "fill": "#FFFF00", "text": "#000000" },
+    "computed": { "fill": "#F2F2F2", "text": "#000000" },
+    "entry_header": { "fill": "#1F4E78", "text": "#FFFFFF" },
+    "reference_header": { "fill": "#737373", "text": "#FFFFFF" },
+    "border": "#BFBFBF"
+  },
+
+  "status": {
+    "ok": { "fill": "#C6EFCE", "text": "#006100" },
+    "under": { "fill": "#FFEB9C", "text": "#8A5900" },
+    "over": { "fill": "#FFC7CE", "text": "#9C0006" }
+  },
+
+  "tabs": {
+    "instructions": "#1F4E78",
+    "entry": "#2E75B6",
+    "reference": "#A6A6A6"
+  },
+
+  "bands": {
+    "Likelihood": [
+      { "name": "Very Low", "fill": "#DCE6F1" },
+      { "name": "Low", "fill": "#B8CCE4" },
+      { "name": "Moderate", "fill": "#8DB4E2" },
+      { "name": "High", "fill": "#538DD5" },
+      { "name": "Very High", "fill": "#1F497D" }
+    ],
+    "Risk": [
+      { "name": "Minimal", "fill": "#63BE7B" },
+      { "name": "Low", "fill": "#A9D18E" },
+      { "name": "Moderate", "fill": "#FFEB84" },
+      { "name": "High", "fill": "#F4B183" },
+      { "name": "Very High", "fill": "#E06666" }
+    ],
+    "Value": [
+      { "name": "Minimal", "fill": "#E06666" },
+      { "name": "Limited", "fill": "#F4B183" },
+      { "name": "Moderate", "fill": "#FFEB84" },
+      { "name": "Significant", "fill": "#A9D18E" },
+      { "name": "Exceptional", "fill": "#63BE7B" }
+    ]
+  },
+
+  "accessibility": {
+    "min_contrast_ratio": 4.5,
+    "enforce": true
+  }
+}

@@ -84,6 +84,48 @@ in
     Combined'''
 
 
+def refresh_status_formula():
+    """One row per source file found, plus when it was last changed.
+
+    Two questions this answers that nothing else could: "did the refresh
+    actually pick up all six centres?" and "how current is what I'm
+    looking at?". Previously a centre file that was missing, misnamed, or
+    saved in the wrong folder just silently contributed nothing -- the
+    PivotTables looked perfectly healthy with five centres in them.
+
+    Reads the same Folder.Files() step the combine queries already use, so
+    it sees exactly what they see. DateTime.LocalNow() is evaluated at
+    refresh time, which is what makes it a "data as of" stamp rather than
+    a formula that would re-evaluate on every recalculation (NOW() would,
+    and would therefore always show the current time even if the data were
+    a week stale -- exactly the wrong behaviour here).
+    """
+    return '''let
+    SourceFolder = Excel.CurrentWorkbook(){[Name="Config"]}[Content]{0}[SourceFolder],
+    RefreshedAt = DateTime.LocalNow(),
+    Source = Folder.Files(SourceFolder),
+    Filtered = Table.SelectRows(Source, each Text.EndsWith([Name], ".xlsx") and not Text.StartsWith([Name], "~$")),
+    // Centre must be derived BEFORE any column selection: it reads the
+    // file's [Content] blob, and dropping that column first makes every
+    // row fall through to the "otherwise" branch (which is exactly what
+    // happened on the first attempt -- it reported three files but named
+    // none of them).
+    WithCentre = Table.AddColumn(Filtered, "Centre", each
+        let
+            Wbk = Excel.Workbook([Content], null, true)
+        in
+            try Text.From(Wbk{[Item="CentreName", Kind="DefinedName"]}[Data]{0}[Column1])
+            otherwise "(could not read - is this a centre file?)"
+    , type text),
+    WithStamp = Table.AddColumn(WithCentre, "Data as of", each RefreshedAt, type datetime),
+    Ordered = Table.SelectColumns(WithStamp, {"Centre", "Name", "Date modified", "Data as of"}),
+    // (SelectColumns is safe from here on -- Centre is already materialised.)
+    Renamed = Table.RenameColumns(Ordered, {{"Name", "File"}, {"Date modified", "File last saved"}}),
+    Sorted = Table.Sort(Renamed, {{"Centre", Order.Ascending}})
+in
+    Sorted'''
+
+
 def main(workbook_name):
     xl = win32.GetActiveObject("Excel.Application")
     wb = next((w for w in xl.Workbooks if w.Name == workbook_name), None)
@@ -144,6 +186,54 @@ def main(workbook_name):
             print(f"OK added to model: {query_name}")
         except pywintypes.com_error as e:
             print(f"FAIL adding {query_name} to model: {e}")
+
+    # Refresh Status: worksheet-only, deliberately NOT added to the Data
+    # Model. It's an operational check for Management ("did all six files
+    # actually get picked up, and how fresh are they?"), not something any
+    # measure or PivotTable should be able to join to.
+    if "RefreshStatus" not in existing_queries:
+        wb.Queries.Add(Name="RefreshStatus", Formula=refresh_status_formula())
+        print("OK query authored: RefreshStatus")
+    else:
+        print("SKIP (query already exists): RefreshStatus")
+
+    if "Refresh Status" not in {s.Name for s in wb.Worksheets}:
+        ws = wb.Worksheets.Add()
+        ws.Name = "Refresh Status"
+        ws.Range("A1").Value = "Source files picked up by the last Data > Refresh All"
+        ws.Range("A1").Font.Bold = True
+        ws.Range("A1").Font.Size = 12
+        ws.Range("A2").Value = (
+            "One row per .xlsx found in the source folder. If a centre is "
+            "missing here, it is missing from every PivotTable too.")
+        ws.Range("A2").Font.Italic = True
+        try:
+            lo = ws.ListObjects.Add(SourceType=0, Source=(
+                'OLEDB;Provider=Microsoft.Mashup.OleDb.1;Data Source=$Workbook$;'
+                'Location=RefreshStatus;Extended Properties=""'
+            ), Destination=ws.Range("A4"))
+            lo.QueryTable.CommandType = 2
+            lo.QueryTable.CommandText = "SELECT * FROM [RefreshStatus]"
+            lo.QueryTable.Refresh()
+            lo.Name = "RefreshStatus"
+            ws.Range("A5").Value = None  # let the query own the body
+            for col, width in (("A", 28), ("B", 30), ("C", 22), ("D", 22)):
+                ws.Columns(col).ColumnWidth = width
+            # Count sits above the table so it reads before the detail.
+            ws.Range("C1").Formula = '=COUNTA(RefreshStatus[File])&" file(s) found"'
+            ws.Range("C1").Font.Bold = True
+            print(f"OK loaded to worksheet: RefreshStatus "
+                  f"({lo.Range.Rows.Count - 1} rows)")
+        except pywintypes.com_error as e:
+            print(f"FAIL loading RefreshStatus to worksheet: {e}")
+    else:
+        print("SKIP (sheet already exists): Refresh Status")
+
+    for conn in wb.Connections:
+        try:
+            conn.OLEDBConnection.BackgroundQuery = False
+        except Exception:
+            pass
 
     wb.Save()
     print("SAVED")

@@ -22,6 +22,7 @@ it's done by real Excel.
 """
 import random
 import sys
+from pathlib import Path
 
 import openpyxl
 from openpyxl.formatting.rule import CellIsRule
@@ -30,14 +31,22 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.workbook.defined_name import DefinedName
 from openpyxl.utils import get_column_letter
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "config"))
+from theme import load_theme  # noqa: E402
+
 random.seed(42)
 
-FONT = "Arial"
-HEADER_FILL = "FF1F4E78"
-HEADER_FONT_COLOR = "FFFFFFFF"
-GREY = "FFF2F2F2"
+# See config/theme.json -- shared with build_centre_template.py and
+# build_consolidation.py, contrast-checked against WCAG AA on load.
+THEME = load_theme()
 
-thin = Side(style="thin", color="FFBFBFBF")
+FONT = THEME.font
+HEADER_FILL, HEADER_FONT_COLOR = THEME.cell("entry_header")
+GREY, _ = THEME.cell("computed")
+TAB_REFERENCE = THEME.tab("reference")
+TAB_INSTRUCTIONS = THEME.tab("instructions")
+
+thin = Side(style="thin", color=THEME.border)
 BORDER = Border(left=thin, right=thin, top=thin, bottom=thin)
 
 
@@ -246,24 +255,42 @@ ws["A1"] = ("Band definitions for computed scores. Six raw 0-5 inputs are left "
 ws["A1"].font = Font(name=FONT, italic=True)
 ws.merge_cells("A1:F1")
 
-rating_rows = [
-    # minValue, id, RatingType, maxValue, BandName, ColourCode
-    (0, 1, "Likelihood", 5, "Very Low", "FFDCE6F1"),
-    (5, 2, "Likelihood", 10, "Low", "FFB8CCE4"),
-    (10, 3, "Likelihood", 15, "Moderate", "FF8DB4E2"),
-    (15, 4, "Likelihood", 20, "High", "FF538DD5"),
-    (20, 5, "Likelihood", 25, "Very High", "FF1F497D"),
-    (0, 6, "Risk", 5, "Minimal", "FF63BE7B"),
-    (5, 7, "Risk", 10, "Low", "FFA9D18E"),
-    (10, 8, "Risk", 15, "Moderate", "FFFFEB84"),
-    (15, 9, "Risk", 20, "High", "FFF4B183"),
-    (20, 10, "Risk", 25, "Very High", "FFE06666"),
-    (0, 11, "Value", 3, "Minimal", "FFE06666"),
-    (3, 12, "Value", 6, "Limited", "FFF4B183"),
-    (6, 13, "Value", 9, "Moderate", "FFFFEB84"),
-    (9, 14, "Value", 12, "Significant", "FFA9D18E"),
-    (12, 15, "Value", 15, "Exceptional", "FF63BE7B"),
+# (minValue, id, RatingType, maxValue, BandName) -- ColourCode is appended
+# from config/theme.json below rather than written literally here, so the
+# band palette has exactly one definition across the whole project. The
+# thresholds and row ORDER are still structural: the VLOOKUP band formulas
+# and the per-type named ranges depend on 5 contiguous rows per RatingType
+# in ascending minValue order (see band_formulas() and the named ranges
+# just below the table).
+rating_bands = [
+    (0, 1, "Likelihood", 5, "Very Low"),
+    (5, 2, "Likelihood", 10, "Low"),
+    (10, 3, "Likelihood", 15, "Moderate"),
+    (15, 4, "Likelihood", 20, "High"),
+    (20, 5, "Likelihood", 25, "Very High"),
+    (0, 6, "Risk", 5, "Minimal"),
+    (5, 7, "Risk", 10, "Low"),
+    (10, 8, "Risk", 15, "Moderate"),
+    (15, 9, "Risk", 20, "High"),
+    (20, 10, "Risk", 25, "Very High"),
+    (0, 11, "Value", 3, "Minimal"),
+    (3, 12, "Value", 6, "Limited"),
+    (6, 13, "Value", 9, "Moderate"),
+    (9, 14, "Value", 12, "Significant"),
+    (12, 15, "Value", 15, "Exceptional"),
 ]
+_band_colours = {rt: THEME.band_colour_map(rt)
+                 for rt in ("Likelihood", "Risk", "Value")}
+rating_rows = []
+for _min, _id, _type, _max, _name in rating_bands:
+    try:
+        _colour = _band_colours[_type][_name]
+    except KeyError:
+        raise SystemExit(
+            f"config/theme.json has no '{_name}' band under bands.{_type} — "
+            f"band names there must match this table exactly."
+        )
+    rating_rows.append((_min, _id, _type, _max, _name, _colour))
 last_rl = write_table(ws, wb, "RatingLookup", 3,
                        ["minValue", "id", "RatingType", "maxValue", "BandName", "ColourCode"],
                        rating_rows, col_widths=[10, 6, 14, 10, 14, 12])
@@ -563,26 +590,26 @@ ws.freeze_panes = "A2"
 # ---------------------------------------------------------------- Conditional formatting: colour by band
 # Colour-code the label cell using the 5 known band colours per RatingType
 # (CellIsRule against the *_Name text keeps this readable without VBA).
-RISK_BANDS = [("Minimal", "FF63BE7B"), ("Low", "FFA9D18E"), ("Moderate", "FFFFEB84"),
-              ("High", "FFF4B183"), ("Very High", "FFE06666")]
-VALUE_BANDS = [("Minimal", "FFE06666"), ("Limited", "FFF4B183"), ("Moderate", "FFFFEB84"),
-               ("Significant", "FFA9D18E"), ("Exceptional", "FF63BE7B")]
+RISK_BANDS = THEME.bands("Risk")
+VALUE_BANDS = THEME.bands("Value")
 
 ws_tac = wb["Tactical"]
-for band_name, colour in RISK_BANDS:
+for band_name, colour, text_colour in RISK_BANDS:
     ws_tac.conditional_formatting.add(
         f"K2:K{last_tactical}",
         CellIsRule(operator="equal", formula=[f'"{band_name}"'],
-                   fill=PatternFill("solid", fgColor=colour, bgColor=colour))
+                   fill=PatternFill("solid", fgColor=colour, bgColor=colour),
+                   font=Font(name=FONT, color=text_colour))
     )
 
 for sheet_name, last_row in (("Initiative", last_initiative), ("Assistance", last_assistance)):
     ws_v = wb[sheet_name]
-    for band_name, colour in VALUE_BANDS:
+    for band_name, colour, text_colour in VALUE_BANDS:
         ws_v.conditional_formatting.add(
             f"J2:J{last_row}",
             CellIsRule(operator="equal", formula=[f'"{band_name}"'],
-                       fill=PatternFill("solid", fgColor=colour, bgColor=colour))
+                       fill=PatternFill("solid", fgColor=colour, bgColor=colour),
+                       font=Font(name=FONT, color=text_colour))
         )
 
 # Tab order follows the data model / left-to-right reading order: each

@@ -170,7 +170,15 @@ Consolidation workbook reads whatever's in that folder.
 3. On the **Instructions** tab, check the **SourceFolder** cell points at
    that folder — it's a normal editable cell, update it if the folder moved.
 4. **Data > Refresh All.**
-5. Review the three PivotTables:
+5. **Check the "Refresh Status" tab first.** It lists every file the refresh
+   actually picked up, with each centre's name, when that file was last
+   saved, and a "Data as of" stamp. You should see six rows. If a centre is
+   missing here, it is missing from every PivotTable too — and nothing else
+   in the workbook will tell you that, because five centres' worth of data
+   looks perfectly healthy. A row reading "(could not read — is this a
+   centre file?)" means there's a stray .xlsx in the folder that isn't a
+   centre submission.
+6. Review the three PivotTables:
    - **Consolidated Priorities** — which priorities each centre is working.
    - **Sum of FTEs by Centre-Team** — resourcing by centre and team.
    - **Sum of FTEs by Priority** — total FTE landing on each priority across
@@ -208,6 +216,29 @@ That's it for the Excel-only path: edit `preparation.xlsx`, then whoever has
 the distributed file (you or the Centre Lead) hits **Data > Refresh All**.
 No new file needed.
 
+## Changing the colours (branding / accessibility)
+
+All colour across all three workbooks comes from one file,
+`config/theme.json` — cell shading, headers, tab colours, the red/amber/green
+status colours, and the Risk/Value band palettes. Corporate brand hex codes
+can be pasted in directly (`#RRGGBB` is fine).
+
+Two things worth knowing before you ask for a colour change:
+
+- **It needs the Build person and a redistribution.** Colour is baked in when
+  the workbooks are generated, so unlike adding a Priority or a Resource, a
+  Refresh All won't pick it up.
+- **Unreadable colours are rejected automatically.** Every foreground/
+  background pair is checked against the WCAG AA contrast standard when the
+  workbooks are built, and the build *stops* if one fails rather than
+  shipping something a colleague can't read. If a brand colour gets refused,
+  that's why. `python config/theme.py` prints the full pass/fail table with
+  each pair's actual contrast ratio.
+
+Status colours are also paired with plain words in the cells (`100% ok`,
+`130% over`), so nothing in these workbooks depends on being able to
+distinguish red from green.
+
 ## When you need the Build person
 
 - Regenerating all six centre files after a structural change to the
@@ -216,6 +247,7 @@ No new file needed.
 - Any structural change: a new column, a new Priority Type, a new dropdown,
   changing how Teams/Priorities/Resource Allocation are laid out.
 - Any change to `RatingLookup` (thresholds, names, colours).
+- Any colour change (see "Changing the colours" above).
 - Anything that errors in a way not covered in this guide's Troubleshooting
   section below.
 

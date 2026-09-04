@@ -148,6 +148,7 @@ from openpyxl.utils import get_column_letter
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_centre_template import (  # noqa: E402
     REF_HEADER_FILL, HEADER_FONT_COLOR, RISK_BANDS, VALUE_BANDS, N_ROWS,
+    TAB_INSTRUCTIONS, TAB_ENTRY, TAB_REFERENCE,
 )
 
 PREP_PATH_M = 'Excel.CurrentWorkbook(){[Name="Config"]}[Content]{0}[PrepFilePath]'
@@ -182,14 +183,25 @@ SCORES_TABLES = [
 ]
 
 SHEET_ORDER = [
-    "Instructions", "Centres", "Position", "Resources",
+    "Instructions",
+    "Step 1 - Teams", "Step 2 - Select Priorities",
+    "Step 3 - Priorities & Ranking", "Step 4 - Resource Allocation",
+    "Ranked View",
+    "Centres", "Position", "Resources",
     "Priority - Tactical", "ProblemSet", "Tactical",
     "Priority - Initiative", "InitiativeType", "Initiative",
     "Priority - Assistance", "AssistanceType", "Assistance",
     "RatingLookup", "Lookups",
+]
+
+# The Centre Lead's own sheets get the "entry" tab colour, everything else
+# the "reference" grey -- matching the blue/grey language both user guides
+# already used for the header fills. Instructions keeps its own darker
+# shade so the starting point is distinguishable from the four steps.
+ENTRY_SHEETS = {
     "Step 1 - Teams", "Step 2 - Select Priorities",
     "Step 3 - Priorities & Ranking", "Step 4 - Resource Allocation",
-]
+}
 
 
 def passthrough_formula(source_table, extra_m=None):
@@ -355,12 +367,16 @@ def main(workbook_name):
             # text-equality rule made Excel flag these for repair on open
             # in the earlier static-copy version (build_centre_template.py
             # has the full note) -- same avoidance applies here.
-            for band_name, colour in bands:
+            for band_name, colour, text_colour in bands:
                 fc = col_range.FormatConditions.Add(
                     Type=2,  # xlExpression
                     Formula1=f'={col_letter}{first_row}="{band_name}"',
                 )
                 fc.Interior.Color = bgr(colour)
+                # Font colour too, not just fill: theme.py picks black or
+                # white per band for best contrast, so a dark brand colour
+                # dropped into theme.json stays readable here.
+                fc.Font.Color = bgr(text_colour)
 
     # Defined names last, in one batch, after every table load/style
     # above has fully settled -- creating a structured-reference name (e.g.
@@ -421,9 +437,34 @@ def main(workbook_name):
     ws_step4.Protect()
     print("OK formula set: Step 4 - Resource Allocation!B2:B{}".format(last_row))
 
+    # Power Query connections default to BackgroundQuery=True, which makes
+    # RefreshAll() return immediately while the data is still loading --
+    # fine interactively, but under automation it means a script can read
+    # (and a verification pass can "confirm") stale or blank tables. Forcing
+    # it off makes every scripted refresh synchronous and deterministic.
+    for conn in wb.Connections:
+        try:
+            conn.OLEDBConnection.BackgroundQuery = False
+        except Exception:
+            pass  # not every connection type exposes this
+
     for name in reversed(SHEET_ORDER):
         if name in {s.Name for s in wb.Worksheets}:
             wb.Worksheets(name).Move(Before=wb.Worksheets(1))
+
+    # Tab colours for the sheets THIS stage created (build_centre_template.py
+    # colours its own). Set here rather than there because these sheets
+    # don't exist yet at stage 1.
+    for sheet in wb.Worksheets:
+        name = sheet.Name
+        if name == "Instructions":
+            colour = TAB_INSTRUCTIONS
+        elif name in ENTRY_SHEETS:
+            colour = TAB_ENTRY
+        else:
+            colour = TAB_REFERENCE
+        sheet.Tab.Color = bgr(colour)
+
     wb.Worksheets(1).Activate()
 
     wb.Save()

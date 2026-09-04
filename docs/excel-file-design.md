@@ -603,6 +603,121 @@ Model, relationship, measure, or PivotTable defect here. Lesson for any
 future COM-driven worksheet read in this project: iterate from
 `used.Row`/`used.Column`, never assume `1`.
 
+## Colour as configuration (`config/theme.json`)
+
+Added 2026-09-04. Colour used to be hardcoded as module constants in three
+build scripts, with the Risk/Value band palette defined in **three** places
+(`RatingLookup`'s `ColourCode` data, plus duplicate `RISK_BANDS`/
+`VALUE_BANDS` constants in `build_preparation.py` and
+`build_centre_template.py`). Changing a corporate colour meant finding
+every copy and hoping. All of it now reads `config/theme.json`, loaded via
+`config/theme.py`.
+
+The file covers cell roles (editable / computed / entry header / reference
+header / border), status colours (ok / under / over), tab colours, and the
+three band palettes. Colours may be written `#RRGGBB`, `RRGGBB`, or
+`AARRGGBB` — they're normalised to Excel's `AARRGGBB` on load, so brand hex
+codes paste straight in.
+
+**Accessibility is enforced, not documented.** `load_theme()` computes the
+WCAG 2.1 contrast ratio of every fill/text pair and raises
+`ThemeContrastError` if any falls below `accessibility.min_contrast_ratio`
+(default 4.5 — AA for normal text), naming the pair and its actual ratio.
+The build stops; it cannot silently ship an unreadable workbook. Run
+`python config/theme.py` for the full report as a table. Band text colours
+aren't configured at all by default: `pick_text_for()` chooses black or
+white per band fill, whichever scores higher, so the palette stays legible
+whatever fills are chosen.
+
+Turning this on immediately caught two failures **in the palette that had
+already shipped**: reference-sheet headers (`#7F7F7F` on white, 4.00:1) and
+the amber "under 100%" text (`#9C6500` on `#FFEB9C`, 4.12:1). Both were
+nudged minimally and hue-preservingly to `#737373` (4.74:1) and `#8A5900`
+(5.02:1). All 22 pairs now pass.
+
+Changing a colour is a **structural** change in the sense the Management
+guide uses: it's baked in at generation time, so it needs a regenerate +
+redistribute, not a Refresh All.
+
+## Centre Lead usability pass (2026-09-04)
+
+Nine changes, all native Excel 2021, no VBA.
+
+**In-row team total (Step 3, new `Team Total % (auto)` column).** The
+"a team's priorities must total 100%" rule is the main thing a Centre Lead
+is trying to satisfy while typing on Step 3, but the running total lived on
+*Step 1*. Now it's in-row, same `SUMIFS` + status treatment Step 4's
+`Person Total %` already used. The Step 1 copy stays — it's the per-team
+summary view.
+
+**Status without relying on colour.** Red/amber/green alone puts all the
+meaning in hue. Excel's built-in **icon sets cannot express this scale**:
+"exactly 100%" is the good value with bad values on *both* sides, and icon
+sets are strictly monotonic, so a middle-is-best scale has no valid
+mapping. Instead each status rule overrides the cell's *number format* from
+within the conditional format, so the cell renders `100% ok`, `130% over`,
+`80% under` while still holding a real number that sums and sorts. Verified
+rendering live (`Range.Text`), not just written. Same treatment on the
+Instructions problem counters (`0 — all clear` / `2 to fix`).
+
+**Problem summary on Instructions.** Four `SUMPRODUCT` counters — teams not
+totalling 100%, duplicate team names, rows sharing a rank within a team,
+people over 100% — so "is this workbook ready to send back?" is one glance
+instead of a row-by-row scan of three sheets. Verified against deliberately
+planted errors (it correctly reported 1 and 2).
+
+**Paste guard.** Data Validation only fires on interactive entry; pasting a
+block of rows bypasses every duplicate check silently. A whole-row
+conditional format now tints any row that breaks a uniqueness rule, so a
+bad paste is visible rather than needing to be hunted for.
+
+**Ranked View sheet.** `CLAUDE.md`'s UI requirements asked for ranking
+"ideally sorted as Rank is entered" — previously unmet and thought to need
+VBA. It's a read-only companion sheet, live-sorted by team then rank.
+Built per-cell as `INDEX(SORT(FILTER(...)),ROW()-4,col)`, **not** one
+spilling formula: a spilling `=SORT(FILTER(...))` written by openpyxl does
+not survive — Excel applies implicit intersection on open and the cell
+returns only the top-left value (verified: the sheet showed a single team
+name). A legacy CSE array over a fixed range spills, but pads every unused
+cell with `#N/A`. The per-cell `INDEX` wrapper returns a scalar so nothing
+needs to spill — the same trick the dropdown helper columns already use.
+Bounded to 100 rows (it recomputes the sort per cell) and reports overflow
+rather than truncating silently.
+
+**Also:** tab colours (blue = your sheets, grey = reference — the guides
+described this for years while every tab was white); hover prompts on all
+14 dropdowns; the empty tail of each 200-row entry sheet hidden past row 30
+(Tables stay full-size — they can't grow under protection); and a warning
+note on `RatingLookup`, the one reference sheet that looks refreshable but
+deliberately isn't.
+
+## Two silent build landmines found while doing the above
+
+Both produced no error anywhere and would have shipped quietly.
+
+**1. openpyxl writes formulas but never evaluates them.** Power Query reads
+*cached values* out of the file XML — it does not open the workbook in
+Excel. So immediately after any openpyxl rebuild of `preparation.xlsx`,
+every computed column in it (`RiskLabel`, `ValueLabel`, `Likelihood`,
+`FullName`, …) is **blank** to every downstream consumer. This surfaced as
+the centre template's `Value/Risk (auto)` column returning empty for every
+priority: `MATCH()` found the right row, `INDEX()` returned nothing,
+because the Power-Query-copied `TacticalScores[RiskLabel]` was an entirely
+blank column. Fixed by adding `scripts/recalc_and_save.py` (open in real
+Excel, full recalculation, save) as a **required** step between generating
+`preparation.xlsx` and building anything from it. See "Regenerating a
+workbook" below for the corrected order.
+
+**2. `RefreshAll()` is asynchronous by default.** Power Query connections
+ship with `BackgroundQuery = True`, so `RefreshAll()` returns while data is
+still loading — meaning an automated script can read, and a verification
+pass can "confirm", a table that is still blank or stale. Both
+`wire_reference_data.py` and `wire_power_query.py` now force
+`BackgroundQuery = False` on every connection, making scripted refreshes
+deterministic. (This is a close cousin of the `UsedRange`-offset
+verification bug recorded above: two separate cases this session where the
+*verification* was wrong rather than the product.)
+
 ## Consolidation workbook
 
 `management/consolidation/consolidation.xlsx` combines the six returned `centre-template.xlsx`
@@ -823,6 +938,14 @@ figures exactly).
 ```bash
 # Preparation workbook
 python management/scripts/build_preparation.py management/preparation.xlsx
+
+# REQUIRED immediately after the line above, before building anything that
+# reads preparation.xlsx. openpyxl writes formulas without evaluating them,
+# and Power Query reads cached values straight from the XML rather than
+# opening the file in Excel -- so until this runs, every computed column
+# (RiskLabel, ValueLabel, Likelihood, FullName, ...) is BLANK to every
+# downstream workbook, silently. See "Two silent build landmines" above.
+python scripts/recalc_and_save.py management/preparation.xlsx
 
 # Centre Lead template -- stage 1 shell only (RatingLookup + Lookups +
 # Instructions + Steps 1-4). Stage 2 (the other 10 reference tables,

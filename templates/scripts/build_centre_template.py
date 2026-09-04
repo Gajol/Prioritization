@@ -45,35 +45,58 @@ import sys
 from pathlib import Path
 
 import openpyxl
-from openpyxl.formatting.rule import FormulaRule
+from openpyxl.formatting.rule import FormulaRule, Rule
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, Protection
+from openpyxl.styles.differential import DifferentialStyle
+from openpyxl.styles.numbers import NumberFormat
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.workbook.defined_name import DefinedName
 from openpyxl.utils import get_column_letter
 
-FONT = "Arial"
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "config"))
+from theme import load_theme  # noqa: E402
+
+# Every colour below comes from config/theme.json -- the single source of
+# truth shared with build_preparation.py and build_consolidation.py. Paste
+# corporate brand hex codes in there, not here. load_theme() contrast-checks
+# every fill/text pair against WCAG AA on import and refuses to build if one
+# fails, so a brand colour can't silently ship an unreadable workbook (run
+# `python config/theme.py` for the full report).
+THEME = load_theme()
+
+FONT = THEME.font
 N_ROWS = 200
+# How many rows of each 200-row entry Table stay visible by default. The
+# Tables themselves are still full-size (they must be -- see the Step 1 -
+# Teams note below on why they can't grow under sheet protection); this
+# only hides the empty tail so a small centre isn't scrolling past ~170
+# blank rows. Centre Leads can unhide normally if they ever need more.
+VISIBLE_ROWS = 30
+# Rows on the read-only "Ranked View" sheet. Deliberately smaller than
+# N_ROWS: that sheet recomputes its sort once per cell (see the note where
+# it's built), so this bounds the cost. It reports overflow rather than
+# truncating silently.
+RANKED_ROWS = 100
 
-YELLOW = "FFFFFF00"
-GREY = "FFF2F2F2"
-HEADER_FILL = "FF1F4E78"
-REF_HEADER_FILL = "FF7F7F7F"
-HEADER_FONT_COLOR = "FFFFFFFF"
-GREEN = "FFC6EFCE"
-GREEN_TEXT = "FF006100"
-RED = "FFFFC7CE"
-RED_TEXT = "FF9C0006"
-AMBER = "FFFFEB9C"
-AMBER_TEXT = "FF9C6500"
+YELLOW, _ = THEME.cell("editable")
+GREY, _ = THEME.cell("computed")
+HEADER_FILL, HEADER_FONT_COLOR = THEME.cell("entry_header")
+REF_HEADER_FILL, _ = THEME.cell("reference_header")
+GREEN, GREEN_TEXT = THEME.status("ok")
+AMBER, AMBER_TEXT = THEME.status("under")
+RED, RED_TEXT = THEME.status("over")
+TAB_INSTRUCTIONS = THEME.tab("instructions")
+TAB_ENTRY = THEME.tab("entry")
+TAB_REFERENCE = THEME.tab("reference")
 
-thin = Side(style="thin", color="FFBFBFBF")
+thin = Side(style="thin", color=THEME.border)
 BORDER = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-RISK_BANDS = [("Minimal", "FF63BE7B"), ("Low", "FFA9D18E"), ("Moderate", "FFFFEB84"),
-              ("High", "FFF4B183"), ("Very High", "FFE06666")]
-VALUE_BANDS = [("Minimal", "FFE06666"), ("Limited", "FFF4B183"), ("Moderate", "FFFFEB84"),
-               ("Significant", "FFA9D18E"), ("Exceptional", "FF63BE7B")]
+# (band name, fill, text) -- text is auto-picked for best contrast against
+# each fill by theme.py unless overridden in theme.json.
+RISK_BANDS = THEME.bands("Risk")
+VALUE_BANDS = THEME.bands("Value")
 
 
 def style_header(cell, ref=False):
@@ -97,6 +120,61 @@ def style_computed(cell):
     cell.fill = PatternFill("solid", fgColor=GREY)
     cell.font = Font(name=FONT)
     cell.border = BORDER
+
+
+def _status_rule(fill, text, suffix, formula):
+    """A conditional-format rule that carries BOTH colour and a text suffix.
+
+    The text suffix is the accessibility half: red/amber/green alone puts
+    all of the meaning in hue, which fails for the ~8% of men with a colour
+    vision deficiency (and in greyscale print, which these workbooks do get
+    printed in). Excel's built-in icon sets can't express this particular
+    scale, because "exactly 100%" is the GOOD value with bad values on
+    both sides -- icon sets are strictly monotonic, so a middle-is-best
+    scale can't be mapped onto one. Overriding the number format from the
+    rule gets the same job done without an extra column: the cell still
+    holds a real number (so it still sums, sorts and compares), it just
+    renders as e.g. `105% over`.
+    """
+    dxf = DifferentialStyle(
+        font=Font(name=FONT, color=text),
+        fill=PatternFill("solid", fgColor=fill, bgColor=fill),
+        numFmt=NumberFormat(numFmtId=200, formatCode=f'0%" {suffix}"'),
+    )
+    return Rule(type="expression", formula=[formula], dxf=dxf)
+
+
+def status_format(ws, cell_range, guard_ref, value_ref, include_under):
+    """Red/amber/green + text suffix on a 'should total 100%' column.
+
+    guard_ref is the cell that says "this row is in use" (blank rows stay
+    unformatted); value_ref is the total being judged. include_under=False
+    for a person's time, which legitimately need not reach 100%.
+    """
+    rules = [(RED, RED_TEXT, "over", f'AND({guard_ref}<>"",{value_ref}>1)')]
+    if include_under:
+        rules.append((AMBER, AMBER_TEXT, "under",
+                      f'AND({guard_ref}<>"",{value_ref}<1,{value_ref}>0)'))
+    rules.append((GREEN, GREEN_TEXT, "ok", f'AND({guard_ref}<>"",{value_ref}=1)'))
+    for fill, text, suffix, formula in rules:
+        ws.conditional_formatting.add(cell_range, _status_rule(fill, text, suffix, formula))
+
+
+def paste_guard(ws, row_range, formula):
+    """Highlight a whole row that breaks a uniqueness rule.
+
+    Data Validation only fires on interactive entry -- pasting a block of
+    rows silently bypasses every duplicate check in this workbook. The
+    check columns still recalculate, but a single tinted cell is easy to
+    scroll past. This tints the entire row instead, so a bad paste is
+    obvious without hunting for it.
+    """
+    ws.conditional_formatting.add(
+        row_range,
+        FormulaRule(formula=[formula],
+                    fill=PatternFill("solid", fgColor=RED, bgColor=RED),
+                    font=Font(name=FONT, color=RED_TEXT, bold=True))
+    )
 
 
 def read_table(src_wb, sheet_name, header_row=1):
@@ -241,6 +319,64 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
             c.alignment = Alignment(wrap_text=True)
             ws.row_dimensions[r].height = 30
         r += 1
+    # ---- Before you send this back: a live problem count ----------------
+    # Previously the only way to know whether the workbook was clean was to
+    # scan three sheets row by row looking for red cells. These are the
+    # same rules the conditional formatting applies, counted. All four
+    # should read 0. Formulas reference Tables created later in this same
+    # script -- that's safe, because they all exist by the time the file is
+    # saved; the #REF!-corruption trap only bites when a formula references
+    # a table that another *stage* creates (see the Step 3/4 "(auto)"
+    # columns, deliberately deferred to wire_reference_data.py).
+    ws.cell(row=r, column=1, value="Before you send this back").font = Font(
+        name=FONT, bold=True, size=12)
+    r += 1
+    ws.cell(row=r, column=1,
+            value=("Every count below should be 0. Anything else is flagged "
+                   "in red on the sheet named beside it.")).font = Font(
+        name=FONT, italic=True)
+    r += 1
+    checks = [
+        ("Teams whose priorities don't total 100%", "Step 1 / Step 3",
+         'SUMPRODUCT((Teams[Team Name]<>"")*(Teams[Priority Allocation Total]<>1))'),
+        ("Duplicate team names", "Step 1",
+         'SUMPRODUCT((Teams[Team Name]<>"")*'
+         '(COUNTIF(Teams[Team Name],Teams[Team Name]&"")>1))'),
+        ("Rows sharing a rank within the same team", "Step 3",
+         'SUMPRODUCT((Priorities[Team Name]<>"")*(Priorities[Rank]<>"")*'
+         '(COUNTIFS(Priorities[Team Name],Priorities[Team Name]&"",'
+         'Priorities[Rank],Priorities[Rank]&"")>1))'),
+        ("People allocated more than 100% of their time", "Step 4",
+         'SUMPRODUCT((ResourceAllocation[Resource]<>"")*'
+         '(ResourceAllocation[Person Total %]>1))'),
+    ]
+    for label, where, formula in checks:
+        ws.cell(row=r, column=1, value=label).font = Font(name=FONT)
+        c = ws.cell(row=r, column=2, value=f"={formula}")
+        style_computed(c)
+        c.font = Font(name=FONT, bold=True)
+        ws.cell(row=r, column=3, value=where).font = Font(name=FONT, italic=True)
+        # Green at 0, red otherwise -- with the same text suffix treatment
+        # used on the entry sheets so the status doesn't rely on hue alone.
+        ws.conditional_formatting.add(
+            f"B{r}",
+            Rule(type="expression", formula=[f"$B{r}=0"],
+                 dxf=DifferentialStyle(
+                     font=Font(name=FONT, bold=True, color=GREEN_TEXT),
+                     fill=PatternFill("solid", fgColor=GREEN, bgColor=GREEN),
+                     numFmt=NumberFormat(numFmtId=201, formatCode='0" — all clear"'))))
+        ws.conditional_formatting.add(
+            f"B{r}",
+            Rule(type="expression", formula=[f"$B{r}>0"],
+                 dxf=DifferentialStyle(
+                     font=Font(name=FONT, bold=True, color=RED_TEXT),
+                     fill=PatternFill("solid", fgColor=RED, bgColor=RED),
+                     numFmt=NumberFormat(numFmtId=202, formatCode='0" to fix"'))))
+        r += 1
+    ws.column_dimensions["B"].width = 22
+    ws.column_dimensions["C"].width = 18
+    r += 1
+
     centre_name_row = r
     ws.cell(row=r, column=1, value="Centre Name:").font = Font(name=FONT, bold=True)
     style_computed(ws.cell(row=r, column=2, value=centre_name or "Example Centre"))
@@ -299,6 +435,25 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     for i, row in enumerate(rl_rows):
         ws.cell(row=2 + i, column=7).fill = PatternFill("solid", fgColor=row[5])
     ws.column_dimensions["G"].width = 4
+    # RatingLookup is the one reference sheet that does NOT update on
+    # Data > Refresh All -- it's a deliberate static copy (see
+    # wire_reference_data.py's docstring for why). It looks identical to
+    # every sheet that does refresh, so without this note the failure mode
+    # is silent: Management edits a band in preparation.xlsx, refreshes,
+    # and this sheet quietly keeps the old values.
+    warn = ws.cell(row=1, column=9,
+                   value=("Note: unlike the other reference sheets, this one does NOT "
+                          "update on Data > Refresh All. It is a fixed copy taken when "
+                          "this workbook was generated. Changing a band's thresholds, "
+                          "name or colour needs a regenerated workbook — ask whoever "
+                          "generated this file."))
+    warn.font = Font(name=FONT, bold=True, color=AMBER_TEXT)
+    warn.fill = PatternFill("solid", fgColor=AMBER)
+    warn.alignment = Alignment(wrap_text=True, vertical="top")
+    warn.border = BORDER
+    ws.merge_cells(start_row=1, start_column=9, end_row=4, end_column=13)
+    for col in "IJKLM":
+        ws.column_dimensions[col].width = 22
 
     # ================================================================= Lookups (small enums, editable-free)
     ws = wb.create_sheet("Lookups")
@@ -427,12 +582,18 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     dv_resources = DataValidation(type="list", formula1="=ResourceStatusList", allow_blank=True)
     dv_resources.error = "Choose Yes, No, or Temp."
     dv_resources.errorTitle = "Invalid entry"
+    dv_resources.promptTitle = "Dedicated resources?"
+    dv_resources.prompt = (
+        "Yes = people are assigned to this team. Temp = borrowed or short-term. No = the team exists but has nobody on it yet.")
     ws.add_data_validation(dv_resources)
     dv_resources.add(f"B2:B{teams_last_row}")
 
     dv_type = DataValidation(type="list", formula1="=PriorityTypeList", allow_blank=True)
     dv_type.error = "Choose Tactical, Initiative, or Assistance."
     dv_type.errorTitle = "Invalid entry"
+    dv_type.promptTitle = "Priority Type"
+    dv_type.prompt = (
+        "A team works on only ONE Priority Type. If a team really spans two, list it twice under different names.")
     ws.add_data_validation(dv_type)
     dv_type.add(f"C2:C{teams_last_row}")
 
@@ -447,21 +608,17 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     )
     dv_unique_team.error = "Team names must be unique within this workbook."
     dv_unique_team.errorTitle = "Duplicate team name"
+    dv_unique_team.promptTitle = "Team name"
+    dv_unique_team.prompt = (
+        "Type this team's name. It must be unique within this workbook, and it's what Steps 3 and 4 will offer you in their Team dropdowns.")
     ws.add_data_validation(dv_unique_team)
     dv_unique_team.add(f"A2:A{teams_last_row}")
 
     ws.protection.sheet = True
 
-    for op, colour, text_colour in (
-        ('AND($A2<>"",$D2>1)', RED, RED_TEXT),
-        ('AND($A2<>"",$D2<1,$D2>0)', AMBER, AMBER_TEXT),
-        ('AND($A2<>"",$D2=1)', GREEN, GREEN_TEXT),
-    ):
-        ws.conditional_formatting.add(
-            f"D2:D{teams_last_row}",
-            FormulaRule(formula=[op], fill=PatternFill("solid", fgColor=colour, bgColor=colour),
-                        font=Font(name=FONT, color=text_colour))
-        )
+    status_format(ws, f"D2:D{teams_last_row}", "$A2", "$D2", include_under=True)
+    paste_guard(ws, f"A2:F{teams_last_row}",
+                f'AND($A2<>"",COUNTIF($A$2:$A${teams_last_row},$A2)>1)')
     ws.freeze_panes = "A2"
 
     # ================================================================= Step 2 - Select Priorities
@@ -519,6 +676,9 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     dv_type_select = DataValidation(type="list", formula1="=PriorityTypeList", allow_blank=True)
     dv_type_select.error = "Choose Tactical, Initiative, or Assistance."
     dv_type_select.errorTitle = "Invalid entry"
+    dv_type_select.promptTitle = "Pick the Type first"
+    dv_type_select.prompt = (
+        "Choose the Type here first — the Priority Title dropdown next to it then narrows to just that Type.")
     ws.add_data_validation(dv_type_select)
     dv_type_select.add(f"A2:A{last_row}")
 
@@ -530,6 +690,9 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     dv_priority_select = DataValidation(type="list", formula1="=INDIRECT($A2)", allow_blank=True)
     dv_priority_select.error = "Pick a priority from Management's master list, matching the Type."
     dv_priority_select.errorTitle = "Unknown priority"
+    dv_priority_select.promptTitle = "Priority Title"
+    dv_priority_select.prompt = (
+        "Pick from Management's master list for the Type you chose. Everything you pick here becomes the shortlist Step 3 offers.")
     ws.add_data_validation(dv_priority_select)
     dv_priority_select.add(f"B2:B{last_row}")
 
@@ -542,6 +705,9 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     )
     dv_unique_priority.error = "Each priority can only be selected once."
     dv_unique_priority.errorTitle = "Duplicate priority"
+    dv_unique_priority.promptTitle = "Priority Title"
+    dv_unique_priority.prompt = (
+        "Pick from Management's master list for the Type you chose. Each priority can only appear once on this sheet.")
     ws.add_data_validation(dv_unique_priority)
     dv_unique_priority.add(f"B2:B{last_row}")
 
@@ -570,8 +736,9 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     ws = wb.create_sheet("Step 3 - Priorities & Ranking")
     ws.sheet_view.showGridLines = False
     headers = ["Team Name", "Priority Title", "Type (auto)", "Rank", "Resourced",
-               "Allocation % of Team Effort", "Value/Risk (auto)"]
-    widths = [22, 42, 16, 10, 12, 22, 16]
+               "Allocation % of Team Effort", "Value/Risk (auto)",
+               "Team Total % (auto)"]
+    widths = [22, 42, 16, 10, 12, 22, 16, 18]
     for i, (h, w) in enumerate(zip(headers, widths), start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
         style_header(ws.cell(row=1, column=i, value=h))
@@ -586,6 +753,22 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
         style_body(ws.cell(row=r, column=5), editable=True)
         style_body(ws.cell(row=r, column=6), editable=True)
         ws.cell(row=r, column=6).number_format = "0%"
+        # Running total of THIS row's team across all its priorities, shown
+        # in-row. The same number is also on Step 1 (Teams' "Priority
+        # Allocation Total"), but the 100%-per-team rule is the main thing
+        # a Centre Lead is trying to satisfy while typing here, and having
+        # to flip to another sheet to find out whether they'd hit it was
+        # the single most-repeated bit of friction in this workbook. Same
+        # SUMIFS + red/amber/green treatment Step 4's "Person Total %"
+        # already used; deliberately repeats rather than cross-references
+        # so each row is self-explanatory.
+        c8 = ws.cell(row=r, column=8)
+        style_computed(c8)
+        c8.number_format = "0%"
+        c8.value = (
+            f'=IF($A{r}="","",SUMIFS(Priorities[Allocation % of Team Effort],'
+            f'Priorities[Team Name],$A{r}))'
+        )
         # Value/Risk band for the selected priority — looked up from
         # whichever of the three embedded scoring tables matches this row's
         # own Type (auto), so Centre Leads see it right where they're
@@ -602,13 +785,16 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
         # assignment) once those 3 tables genuinely exist.
         style_computed(ws.cell(row=r, column=7))
 
-    tab = Table(displayName="Priorities", ref=f"A1:G{last_row}")
+    tab = Table(displayName="Priorities", ref=f"A1:H{last_row}")
     tab.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
     ws.add_table(tab)
 
     dv_team2 = DataValidation(type="list", formula1="=TeamNameList", allow_blank=True)
     dv_team2.error = "Pick a team defined on 'Step 1 - Teams'."
     dv_team2.errorTitle = "Unknown team"
+    dv_team2.promptTitle = "Team name"
+    dv_team2.prompt = (
+        "Pick a team you listed in Step 1. Its Priority Type decides which priorities you'll be offered next.")
     ws.add_data_validation(dv_team2)
     dv_team2.add(f"A2:A{last_row}")
 
@@ -623,12 +809,18 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     dv_priority = DataValidation(type="list", formula1='=INDIRECT("Selected"&$C2)', allow_blank=True)
     dv_priority.error = "Pick a priority from your Step 2 selection, matching the team's Priority Type."
     dv_priority.errorTitle = "Unknown priority"
+    dv_priority.promptTitle = "Priority Title"
+    dv_priority.prompt = (
+        "Only priorities you selected in Step 2 that match this team's Priority Type are offered here.")
     ws.add_data_validation(dv_priority)
     dv_priority.add(f"B2:B{last_row}")
 
     dv_resourced = DataValidation(type="list", formula1="=YesNoList", allow_blank=True)
     dv_resourced.error = "Choose Yes or No."
     dv_resourced.errorTitle = "Invalid entry"
+    dv_resourced.promptTitle = "Resourced?"
+    dv_resourced.prompt = (
+        "Is the team actually putting people against this priority right now? Yes or No.")
     ws.add_data_validation(dv_resourced)
     dv_resourced.add(f"E2:E{last_row}")
 
@@ -641,6 +833,9 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     )
     dv_rank.error = "Rank must be a positive whole number, unique within the team."
     dv_rank.errorTitle = "Invalid rank"
+    dv_rank.promptTitle = "Rank"
+    dv_rank.prompt = (
+        "1 = this team's highest priority. Whole numbers only, and each rank can be used once per team.")
     ws.add_data_validation(dv_rank)
     dv_rank.add(f"D2:D{last_row}")
 
@@ -651,6 +846,9 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     dv_alloc2 = DataValidation(type="list", formula1="=PercentIncrementsList", allow_blank=True)
     dv_alloc2.error = "Pick a value from the dropdown (5% steps)."
     dv_alloc2.errorTitle = "Invalid entry"
+    dv_alloc2.promptTitle = "Share of team effort"
+    dv_alloc2.prompt = (
+        "What share of THIS TEAM's total effort goes to this priority. A team's priorities should add up to exactly 100% — watch the Team Total % column at the end of the row.")
     ws.add_data_validation(dv_alloc2)
     dv_alloc2.add(f"F2:F{last_row}")
 
@@ -660,18 +858,26 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     # match the Label text in column G, or a Tactical and an
     # Initiative/Assistance row with the same band name would get each
     # other's colour.
-    for band_name, colour in RISK_BANDS:
+    for band_name, colour, text_colour in RISK_BANDS:
         ws.conditional_formatting.add(
             f"G2:G{last_row}",
             FormulaRule(formula=[f'AND($C2="Tactical",$G2="{band_name}")'],
-                        fill=PatternFill("solid", fgColor=colour, bgColor=colour))
+                        fill=PatternFill("solid", fgColor=colour, bgColor=colour),
+                        font=Font(name=FONT, color=text_colour))
         )
-    for band_name, colour in VALUE_BANDS:
+    for band_name, colour, text_colour in VALUE_BANDS:
         ws.conditional_formatting.add(
             f"G2:G{last_row}",
             FormulaRule(formula=[f'AND($C2<>"Tactical",$C2<>"",$G2="{band_name}")'],
-                        fill=PatternFill("solid", fgColor=colour, bgColor=colour))
+                        fill=PatternFill("solid", fgColor=colour, bgColor=colour),
+                        font=Font(name=FONT, color=text_colour))
         )
+    status_format(ws, f"H2:H{last_row}", "$A2", "$H2", include_under=True)
+    # A team's priorities must total exactly 100%, so "under" is a real
+    # amber warning here (unlike Step 4, where a person under 100% is fine).
+    paste_guard(ws, f"A2:H{last_row}",
+                'AND($A2<>"",$D2<>"",'
+                f'COUNTIFS($A$2:$A${last_row},$A2,$D$2:$D${last_row},$D2)>1)')
 
     ws.protection.sheet = True
     ws.freeze_panes = "A2"
@@ -712,12 +918,18 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     dv_res_name = DataValidation(type="list", formula1="=ResourceNameList", allow_blank=True)
     dv_res_name.error = "Pick a person from Management's Resources list."
     dv_res_name.errorTitle = "Unknown resource"
+    dv_res_name.promptTitle = "Resource"
+    dv_res_name.prompt = (
+        "Only people associated with your centre are listed. If someone's missing, ask Management to associate them — don't type a name in by hand.")
     ws.add_data_validation(dv_res_name)
     dv_res_name.add(f"A2:A{last_row}")
 
     dv_team3 = DataValidation(type="list", formula1="=TeamNameList", allow_blank=True)
     dv_team3.error = "Pick a team defined on 'Step 1 - Teams'."
     dv_team3.errorTitle = "Unknown team"
+    dv_team3.promptTitle = "Team name"
+    dv_team3.prompt = (
+        "Which of your Step 1 teams is this person working on?")
     ws.add_data_validation(dv_team3)
     dv_team3.add(f"C2:C{last_row}")
 
@@ -726,21 +938,83 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     dv_alloc3 = DataValidation(type="list", formula1="=PercentIncrementsList", allow_blank=True)
     dv_alloc3.error = "Pick a value from the dropdown (5% steps)."
     dv_alloc3.errorTitle = "Invalid entry"
+    dv_alloc3.promptTitle = "Share of this person's time"
+    dv_alloc3.prompt = (
+        "What share of THIS PERSON's time goes to this team. It doesn't have to reach 100%, but it must not exceed it — watch the Person Total % column.")
     ws.add_data_validation(dv_alloc3)
     dv_alloc3.add(f"D2:D{last_row}")
 
     ws.protection.sheet = True
 
-    for op, colour, text_colour in (
-        ('AND($A2<>"",$E2>1)', RED, RED_TEXT),
-        ('AND($A2<>"",$E2=1)', GREEN, GREEN_TEXT),
-    ):
-        ws.conditional_formatting.add(
-            f"E2:E{last_row}",
-            FormulaRule(formula=[op], fill=PatternFill("solid", fgColor=colour, bgColor=colour),
-                        font=Font(name=FONT, color=text_colour))
-        )
+    # include_under=False: a person's time across teams doesn't have to
+    # reach 100% (they may be part-allocated), so under-100% isn't a
+    # warning here — only over-100% is. Same rule as before this became a
+    # shared helper.
+    status_format(ws, f"E2:E{last_row}", "$A2", "$E2", include_under=False)
+    paste_guard(ws, f"A2:E{last_row}",
+                f'AND($A2<>"",$C2<>"",'
+                f'COUNTIFS($A$2:$A${last_row},$A2,$C$2:$C${last_row},$C2)>1)')
     ws.freeze_panes = "A2"
+
+    # ================================================================= Ranked View (read-only)
+    # CLAUDE.md's UI requirements ask for the ranking "ideally sorted as
+    # Rank is entered". Sorting the entry Table itself as someone types is
+    # not possible without VBA (and would fight the fixed-size, protected
+    # Table design anyway), so this is the read-only companion instead: a
+    # live, always-sorted view of whatever Step 3 currently holds, grouped
+    # by team then rank.
+    #
+    # Per-cell INDEX over the sorted array, NOT one spilling formula. A
+    # spilling `=SORT(FILTER(...))` was tried first and does not survive
+    # being written by openpyxl: Excel applies implicit intersection to it
+    # on open and the cell returns just the top-left value instead of
+    # spilling (verified — the sheet showed one team name and nothing
+    # else). Marking it as a legacy CSE array over a fixed range would
+    # spill, but pads every unused cell with #N/A, which this project
+    # treats as a defect. Wrapping in INDEX(...,row,col) returns a plain
+    # scalar per cell, so nothing needs to spill at all — the same
+    # already-proven trick the Step 1/Step 2 dropdown helper columns use.
+    ws = wb.create_sheet("Ranked View")
+    ws.sheet_view.showGridLines = False
+    ws["A1"] = "Your Step 3 priorities, sorted by team then rank"
+    ws["A1"].font = Font(name=FONT, bold=True, size=12)
+    ws["A2"] = ("Read-only — this updates itself from 'Step 3 - Priorities & "
+                "Ranking'. Nothing to fill in here.")
+    ws["A2"].font = Font(name=FONT, italic=True)
+    ranked_headers = ["Team Name", "Priority Title", "Type", "Rank", "Resourced",
+                      "Allocation %", "Value/Risk"]
+    for i, (h, w) in enumerate(zip(ranked_headers,
+                                   [22, 42, 16, 10, 12, 14, 16]), start=1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+        style_header(ws.cell(row=4, column=i, value=h))
+
+    # SORT's sort_index takes an array ({1,4} = Team Name, then Rank), so a
+    # single call covers both sort levels.
+    sorted_array = (
+        '_xlfn.SORT(_xlfn._xlws.FILTER(Priorities[[Team Name]:[Value/Risk (auto)]],'
+        '(Priorities[Team Name]<>"")*(Priorities[Rank]<>"")),{1,4},{1,1})'
+    )
+    for i in range(RANKED_ROWS):
+        r = 5 + i
+        for c in range(1, len(ranked_headers) + 1):
+            cell = ws.cell(row=r, column=c)
+            style_computed(cell)
+            cell.value = f'=IFERROR(INDEX({sorted_array},ROW()-4,{c}),"")'
+        ws.cell(row=r, column=4).number_format = "0"
+        ws.cell(row=r, column=6).number_format = "0%"
+
+    # RANKED_ROWS is smaller than the 200-row Step 3 Table (recomputing the
+    # sort per cell is the cost of not spilling, so this stays bounded).
+    # 15 teams is the documented cap and ~50 priorities exist in total, so
+    # overflowing this is implausible — but say so rather than truncating
+    # silently if it ever happens.
+    ws.cell(row=3, column=1, value=(
+        f'=IF(COUNTA(Priorities[Team Name])>{RANKED_ROWS},'
+        f'"More than {RANKED_ROWS} ranked rows exist — only the first '
+        f'{RANKED_ROWS} are shown here. Step 3 still holds them all.","")'
+    )).font = Font(name=FONT, bold=True, color=RED_TEXT)
+    ws.protection.sheet = True
+    ws.freeze_panes = "A5"
 
     # Final tab order (interleaving the Power-Query-authored reference
     # sheets from wire_reference_data.py with these) is set there, once
@@ -750,8 +1024,34 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     # the two stages.
     SHEET_ORDER = ["Instructions", "RatingLookup", "Lookups",
                    "Step 1 - Teams", "Step 2 - Select Priorities",
-                   "Step 3 - Priorities & Ranking", "Step 4 - Resource Allocation"]
+                   "Step 3 - Priorities & Ranking", "Step 4 - Resource Allocation",
+                   "Ranked View"]
     wb._sheets = [wb[name] for name in SHEET_ORDER]
+
+    # Tab colours: the user guides have always described "blue tabs are
+    # yours, grey tabs are Management's reference data", but the tabs
+    # themselves were all default-white — the one place a Centre Lead
+    # actually navigates from carried none of that distinction. Reference
+    # sheets built in stage 2 get the same treatment in
+    # wire_reference_data.py.
+    wb["Instructions"].sheet_properties.tabColor = TAB_INSTRUCTIONS
+    for name in ("Step 1 - Teams", "Step 2 - Select Priorities",
+                 "Step 3 - Priorities & Ranking", "Step 4 - Resource Allocation"):
+        wb[name].sheet_properties.tabColor = TAB_ENTRY
+    for name in ("RatingLookup", "Lookups", "Ranked View"):
+        wb[name].sheet_properties.tabColor = TAB_REFERENCE
+
+    # Hide the empty tail of each 200-row entry sheet. The Tables stay
+    # full-size (they have to — a Table can't grow under sheet protection,
+    # see the Step 1 - Teams note above), this only stops a small centre
+    # scrolling past ~170 blank rows to reach the end. Unhiding is the
+    # normal Excel gesture and nothing breaks if a Centre Lead does it.
+    for name in ("Step 2 - Select Priorities", "Step 3 - Priorities & Ranking",
+                 "Step 4 - Resource Allocation"):
+        ws_hide = wb[name]
+        for r in range(VISIBLE_ROWS + 2, last_row + 1):
+            ws_hide.row_dimensions[r].hidden = True
+
     wb.active = 0
     wb.save(out_path)
     print("saved", out_path)

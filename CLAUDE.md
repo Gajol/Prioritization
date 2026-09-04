@@ -587,3 +587,69 @@ Write these as Markdown in `/docs`:
   was originally added to — corrected in place there, kept as a
   dated correction here rather than silently deleted, per this file's
   usual convention).
+- NEW (2026-09-04): colour is now configuration, not code —
+  `config/theme.json` + `config/theme.py`. Previously hardcoded in three
+  build scripts, with the Risk/Value band palette defined in THREE places
+  (RatingLookup's ColourCode data plus duplicate RISK_BANDS/VALUE_BANDS
+  constants in build_preparation.py and build_centre_template.py). Now one
+  file drives cell roles, status colours, tab colours and all three band
+  palettes; accepts `#RRGGBB`/`RRGGBB`/`AARRGGBB` so brand hex codes paste
+  straight in. `load_theme()` contrast-checks every fill/text pair against
+  WCAG 2.1 AA and RAISES rather than building if one fails — this caught
+  two failures in the palette that had ALREADY SHIPPED (reference headers
+  #7F7F7F on white at 4.00:1; amber "under" text #9C6500 at 4.12:1), both
+  fixed minimally and hue-preservingly. Band text colours are auto-picked
+  black-or-white for best contrast unless overridden. `python
+  config/theme.py` prints the full report. Changing a colour is a
+  structural change (regenerate + redistribute), not a Refresh All.
+- NEW (2026-09-04): Centre Lead usability pass — 9 changes, native Excel
+  2021, no VBA. (1) Step 3 gained an in-row `Team Total % (auto)` column;
+  the 100%-per-team rule was previously only visible on Step 1, a sheet
+  away from where it's typed. (2) Status no longer depends on hue: each
+  status rule overrides the cell's NUMBER FORMAT from inside the
+  conditional format, so cells render `100% ok`/`130% over`/`80% under`
+  while still holding real numbers. Excel's icon sets genuinely cannot do
+  this — "exactly 100%" is good with bad values on both sides, and icon
+  sets are strictly monotonic. (3) Four SUMPRODUCT problem counters on
+  Instructions ("Before you send this back"). (4) Whole-row paste guard —
+  Data Validation doesn't fire on paste. (5) New read-only `Ranked View`
+  sheet, live-sorted by team then rank, which finally satisfies
+  CLAUDE.md's long-unmet "ideally sorted as Rank is entered" requirement.
+  (6) Tab colours. (7) Hover prompts on all 14 dropdowns. (8) Empty tail
+  of each 200-row sheet hidden past row 30. (9) Warning note on
+  RatingLookup, the one reference sheet that looks refreshable but isn't.
+  Ranked View gotcha: a spilling `=SORT(FILTER(...))` written by openpyxl
+  does NOT survive — Excel applies implicit intersection on open and the
+  cell returns only the top-left value; a legacy CSE array spills but pads
+  with #N/A. Built per-cell as `INDEX(SORT(FILTER(...)),ROW()-4,col)`
+  instead, the same non-spilling trick the dropdown helpers use.
+- FIXED (2026-09-04), two silent build landmines found while doing the
+  above, both producing no error anywhere:
+  1. **openpyxl writes formulas but never evaluates them**, and Power
+     Query reads CACHED VALUES from the file XML rather than opening the
+     workbook in Excel. So immediately after any openpyxl rebuild of
+     preparation.xlsx, every computed column in it (RiskLabel, ValueLabel,
+     Likelihood, FullName...) is BLANK to every downstream consumer.
+     Surfaced as the centre template's `Value/Risk (auto)` returning empty
+     for every priority — MATCH() found the right row, INDEX() returned
+     nothing, because the Power-Query-copied `TacticalScores[RiskLabel]`
+     was an entirely blank column. Fixed by adding
+     `scripts/recalc_and_save.py` as a REQUIRED build step between
+     generating preparation.xlsx and building anything from it; the
+     regeneration order in excel-file-design.md is updated accordingly.
+  2. **`RefreshAll()` is asynchronous by default** (connections ship with
+     BackgroundQuery=True), so a script can read — and a verification pass
+     can "confirm" — a table that is still loading or blank. Both
+     wire_reference_data.py and wire_power_query.py now force
+     `BackgroundQuery = False` on every connection.
+- NEW (2026-09-04): Consolidation gained a `Refresh Status` sheet
+  (worksheet-only, deliberately NOT in the Data Model): one row per source
+  file found, with the centre's name, the file's last-saved time, and a
+  "Data as of" stamp from `DateTime.LocalNow()` evaluated at refresh time.
+  Answers the two questions nothing previously could — "did the refresh
+  pick up all six?" and "how current is this?" — since a missing centre
+  file otherwise contributes nothing silently and five centres look
+  perfectly healthy. Authoring gotcha: the Centre column must be derived
+  BEFORE any `Table.SelectColumns`, since it reads the file's `[Content]`
+  blob; selecting columns first made every row fall through to the
+  fallback text (it reported three files but named none of them).

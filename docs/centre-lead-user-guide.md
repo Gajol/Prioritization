@@ -28,11 +28,25 @@ there. If they look wrong, tell Management before you start entering data.
   **Resources** tab only shows people associated with *your* centre — if
   someone's missing, tell Management, don't try to add them yourself.
   Same for a missing person/position/priority anywhere else here.
-- **Blue-header tabs** are yours: Step 1, Step 2, Step 3, Step 4.
+- **Blue tabs** are yours: Step 1, Step 2, Step 3, Step 4. **Grey tabs** are
+  Management's reference data plus the read-only **Ranked View**.
 - Every dropdown is alphabetical and only shows real choices — no blank
   entries below the real ones. A team or priority you just added won't
   necessarily appear at the *bottom* of its dropdown; it'll be wherever
   it falls alphabetically.
+- Click any yellow cell and a short hint appears telling you what belongs
+  there.
+- Each entry sheet shows about 30 rows. If you need more, select the last
+  visible row, drag down, right-click and choose **Unhide** — the sheets
+  really do go to 200 rows.
+
+## Check before you send it back
+
+Open the **Instructions** tab and look at the four counters near the
+bottom, under "Before you send this back". Every one should read
+**0 — all clear**. Anything reading e.g. "2 to fix" tells you both what's
+wrong and which sheet to fix it on. That's the whole check — you don't need
+to scan the sheets row by row.
 
 ## Step 1 — Teams
 
@@ -80,9 +94,18 @@ For each team, list the priorities it's working on:
 | Resourced | Yes / No — is the team actually putting resources against this? |
 | Allocation % of Team Effort | What share of the team's total effort goes to this priority |
 | Value/Risk (auto) | Fills in automatically once you pick a Priority Title — Management's own Risk (Tactical) or Value (Initiative/Assistance) rating for it, colour-coded. Use it while you rank: a #1 you've ranked "Minimal" is worth a second look. |
+| Team Total % (auto) | Fills in automatically — this team's allocations added up. Aim for `100% ok`. |
 
-A team's Allocation % across all its priorities can't exceed 100% — Excel will
-refuse an entry that would push it over.
+**Watch the last column as you type.** It shows the running total for
+whichever team that row belongs to, and it spells out the verdict:
+`100% ok`, `80% under`, or `130% over`. A team's priorities should come to
+exactly 100%.
+
+## Ranked View
+
+A read-only grey tab that shows your Step 3 rows sorted by team, then by
+rank. Nothing to fill in — it re-sorts itself as you type in Step 3. Use it
+to sanity-check your ordering without disturbing your entry sheet.
 
 ## Step 4 — Resource Allocation
 
@@ -131,9 +154,13 @@ a 100%-total check. Use it to sanity-check your ranking, not your allocation.
   value would create a duplicate team name, a duplicate rank within a team, push
   an allocation over 100%, or pick a priority you haven't selected on Step 2. Read
   the message; it names the specific problem.
-- **I pasted several rows at once and something looks off** — pasting can skip the
-  live validation checks. Glance at the check columns (they still recalculate) and
-  fix anything red before sending the file back.
+- **I pasted several rows at once and something looks off** — pasting skips the
+  live validation checks (Excel only runs them as you type). Any row that ends up
+  duplicating a team name, or a rank within a team, is highlighted **across the
+  whole row** so it's hard to miss. The Instructions counters catch it too.
+- **A whole row has turned red** — that row duplicates something it shouldn't:
+  either a team name (Step 1) or a rank within the same team (Step 3). Change one
+  of the two clashing rows.
 
 ## Sending it back
 
