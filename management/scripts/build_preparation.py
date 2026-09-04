@@ -95,9 +95,10 @@ text_blocks = [
     ("It uses the SAME data model as the Centre Lead workbooks (same table "
      "names/columns, defined from data-model/priorities.dbml). Centre Leads "
      "receive copies of the reference tables here (Centres, Position, "
-     "Resources, Priority, Tactical, Initiative, Assistance, RatingLookup) "
-     "plus their own blank transactional tables (Teams, TeamPriorities, "
-     "TeamPriorityAllocation, ResourceAllocation).", None, False),
+     "Resources, ResourceCentres, Priority, Tactical, Initiative, "
+     "Assistance, RatingLookup) plus their own blank transactional tables "
+     "(Teams, TeamPriorities, TeamPriorityAllocation, ResourceAllocation).",
+     None, False),
     ("", None, False),
     ("Sheets", 12, True),
     ("Centres, Position, ProblemSet, InitiativeType, AssistanceType — small "
@@ -105,6 +106,10 @@ text_blocks = [
     ("RatingLookup — band definitions (name + colour) for Likelihood, Risk, "
      "and Value scores. See 'Simplifications' below.", None, False),
     ("Resources — 100 synthesized people across the Position roster.", None, False),
+    ("ResourceCentres — which Centre(s) each Resource is associated with "
+     "(many-to-many: a person can be associated with more than one "
+     "centre). Each centre file's own Resource picker (Step 4) only "
+     "offers people associated with that centre.", None, False),
     ("Priority — 50 synthesized priorities split across the three types.", None, False),
     ("Tactical / Initiative / Assistance — one scoring row per matching "
      "Priority, with computed Likelihood/Risk or Value and a band label + "
@@ -309,8 +314,47 @@ while len(resources) < 100:
 
 ws = wb.create_sheet("Resources")
 ws.sheet_view.showGridLines = False
-write_table(ws, wb, "Resources", 1, ["FirstName", "LastName", "PositionTitle"], resources,
-            col_widths=[16, 16, 26])
+# FullName is a real formula, not a hardcoded value — same pattern the
+# centre files' own Power-Query-computed FullName column uses (see
+# wire_reference_data.py's resources_formula()) — kept in sync here so
+# preparation.xlsx has a matching join key for the ResourceCentres
+# relationship below (Management's own Data Model, for reporting).
+res_headers = ["FirstName", "LastName", "PositionTitle"]
+for i, h in enumerate(res_headers):
+    style_header(ws.cell(row=1, column=1 + i, value=h))
+style_header(ws.cell(row=1, column=len(res_headers) + 1, value="FullName"))
+for r_off, row in enumerate(resources):
+    row_num = 2 + r_off
+    for c_off, val in enumerate(row):
+        style_body(ws.cell(row=row_num, column=1 + c_off, value=val))
+    style_body(ws.cell(row=row_num, column=len(res_headers) + 1,
+                        value=f'=A{row_num}&" "&B{row_num}'))
+last_res_row = 1 + len(resources)
+tab = Table(displayName="Resources", ref=f"A1:D{last_res_row}")
+tab.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
+ws.add_table(tab)
+for col, w in zip("ABCD", [16, 16, 26, 26]):
+    ws.column_dimensions[col].width = w
+
+# =====================================================================
+# ResourceCentres — many-to-many: a Resource can be associated with more
+# than one Centre. Each centre file's own Resources dropdown (Step 4) is
+# filtered to just its own associated people via this table (see
+# wire_reference_data.py) — a Resource stays global here in
+# preparation.xlsx (Management sees everyone), the association is what's
+# scoped per centre.
+# =====================================================================
+resource_centres = []
+for fn, ln, _pos in resources:
+    full_name = f"{fn} {ln}"
+    n_centres = random.choices([1, 2, 3], weights=[60, 30, 10], k=1)[0]
+    for code in random.sample(CENTRE_CODES, n_centres):
+        resource_centres.append((full_name, code))
+
+ws = wb.create_sheet("ResourceCentres")
+ws.sheet_view.showGridLines = False
+write_table(ws, wb, "ResourceCentres", 1, ["Resource", "CentreCode"], resource_centres,
+            col_widths=[26, 12])
 
 # =====================================================================
 # Priority (50 synthesized, split across the three types)
@@ -546,7 +590,7 @@ for sheet_name, last_row in (("Initiative", last_initiative), ("Assistance", las
 # consumes it (ProblemSet->Tactical, InitiativeType->Initiative,
 # AssistanceType->Assistance); RatingLookup goes last since all three
 # scoring tables share it rather than it belonging to one.
-SHEET_ORDER = ["Instructions", "Centres", "Position", "Resources", "Priority",
+SHEET_ORDER = ["Instructions", "Centres", "Position", "Resources", "ResourceCentres", "Priority",
                "ProblemSet", "Tactical", "InitiativeType", "Initiative",
                "AssistanceType", "Assistance", "RatingLookup"]
 wb._sheets = [wb[name] for name in SHEET_ORDER]

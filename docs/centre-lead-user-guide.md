@@ -6,7 +6,7 @@ Once a quarter, Management sends you a copy of this workbook, already named for
 your centre. It's how your centre reports:
 
 1. What teams you have.
-2. What priorities each team is working on, and how you rank them.
+2. Which priorities you're considering, and how you rank them per team.
 3. How your people's time is split across teams.
 
 Fill it in and send it back. No Power Pivot, no macros, no add-ins required — just
@@ -22,11 +22,13 @@ there. If they look wrong, tell Management before you start entering data.
 ## The sheets
 
 - **Grey-header tabs** (Centres, Position, ProblemSet, InitiativeType,
-  AssistanceType, RatingLookup, Resources, Priority, Tactical, Initiative,
-  Assistance) are Management's reference data. They're locked — you can look, but
-  you can't type into them. If something you need isn't there (a person, a
-  position, a priority), tell Management; don't try to add it yourself.
-- **Blue-header tabs** are yours: Step 1, Step 2, Step 3.
+  AssistanceType, RatingLookup, Resources, Priority - Tactical/Initiative/
+  Assistance, Tactical, Initiative, Assistance) are Management's reference
+  data. They're locked — you can look, but you can't type into them. The
+  **Resources** tab only shows people associated with *your* centre — if
+  someone's missing, tell Management, don't try to add them yourself.
+  Same for a missing person/position/priority anywhere else here.
+- **Blue-header tabs** are yours: Step 1, Step 2, Step 3, Step 4.
 
 ## Step 1 — Teams
 
@@ -42,16 +44,33 @@ A team only works on **one** Priority Type. If a team genuinely spans two types,
 list it twice under two different names.
 
 The last two columns (Priority Allocation Total, Resource Effort Total) fill in
-automatically as you complete Steps 2 and 3 — don't type into them.
+automatically as you complete Steps 3 and 4 — don't type into them.
 
-## Step 2 — Priorities & Ranking
+## Step 2 — Select Priorities
+
+Before ranking anything, build your shortlist: from Management's full master
+list, pick every priority your centre is considering, across all three Types.
+
+| Column | What to enter |
+|---|---|
+| Priority Type | Tactical / Initiative / Assistance |
+| Priority Title | Pick from the dropdown — filtered to the Type you just chose |
+
+Add one row per priority. **This shortlist is what Step 3's Priority dropdown
+offers** — a priority that isn't on this list can't be ranked, even if it's on
+Management's master list. If you don't see a priority you need here, it comes
+from Management's master list — nothing to do on this sheet, ask Management to
+add it for the next cycle (see Step 3 below, this is different from a priority
+missing here just because you haven't selected it yet).
+
+## Step 3 — Priorities & Ranking
 
 For each team, list the priorities it's working on:
 
 | Column | What to enter |
 |---|---|
 | Team Name | Pick from the dropdown (must already exist in Step 1) |
-| Priority Title | Pick from the dropdown — **only priorities matching the team's Priority Type are offered** |
+| Priority Title | Pick from the dropdown — **only priorities you selected in Step 2, matching the team's Priority Type, are offered** |
 | Type (auto) | Fills in automatically from the team — don't type into it |
 | Rank | A positive whole number, unique within the team (1 = highest priority) |
 | Resourced | Yes / No — is the team actually putting resources against this? |
@@ -61,13 +80,13 @@ For each team, list the priorities it's working on:
 A team's Allocation % across all its priorities can't exceed 100% — Excel will
 refuse an entry that would push it over.
 
-## Step 3 — Resource Allocation
+## Step 4 — Resource Allocation
 
 For each person working on a team:
 
 | Column | What to enter |
 |---|---|
-| Resource | Pick the person from the dropdown |
+| Resource | Pick the person from the dropdown — **only people associated with your centre are offered** |
 | Position Title (auto) | Fills in automatically — don't type into it |
 | Team Name | Pick from the dropdown |
 | Allocation % of Person's Time | What share of this person's time goes to this team |
@@ -84,7 +103,7 @@ your entries before sending the file back:
   allocated yet), but worth a second look.
 - **Red** — over 100%. Something's wrong; fix it before sending the file back.
 
-The colour on **Value/Risk (auto)** (Step 2) means something different — it's
+The colour on **Value/Risk (auto)** (Step 3) means something different — it's
 Management's Risk/Value band for that priority (green/light-green = low risk or
 high value, red = high risk or low value, depending on the priority's Type), not
 a 100%-total check. Use it to sanity-check your ranking, not your allocation.
@@ -95,15 +114,22 @@ a 100%-total check. Use it to sanity-check your ranking, not your allocation.
   Resource you picked doesn't match anything in Step 1 or the Resources list.
   Usually means a typo got in before you switched to the dropdown, or a team was
   renamed after you'd already referenced it elsewhere.
+- **A priority I need doesn't show up in Step 3's dropdown, but I can see it on
+  Step 2's own dropdown** — you haven't added it to your Step 2 shortlist yet.
+  Add it there first; nothing to ask Management for.
+- **A priority doesn't show up anywhere, including Step 2** — that one genuinely
+  isn't on Management's master list yet. Ask Management to add it for the next
+  cycle.
+- **A person I need doesn't show up in Step 4's Resource dropdown** — they're not
+  associated with your centre in Management's records. Ask Management to add the
+  association for the next cycle; don't try to type their name in manually.
 - **Excel refuses my entry with a pop-up** — that's the point: it's telling you the
-  value would create a duplicate team name, a duplicate rank within a team, or push
-  an allocation over 100%. Read the message; it names the specific problem.
+  value would create a duplicate team name, a duplicate rank within a team, push
+  an allocation over 100%, or pick a priority you haven't selected on Step 2. Read
+  the message; it names the specific problem.
 - **I pasted several rows at once and something looks off** — pasting can skip the
   live validation checks. Glance at the check columns (they still recalculate) and
   fix anything red before sending the file back.
-- **I don't see the person/position/priority I need** — that comes from
-  Management's reference data, which you can't edit here. Ask Management to add it
-  for the next cycle.
 
 ## Sending it back
 

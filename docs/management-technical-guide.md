@@ -129,13 +129,13 @@ split exists and [`excel-file-design.md`](excel-file-design.md) for the
 full technical reasoning. `preparation.xlsx` itself keeps the single
 `Priority`/`Tactical`/`Initiative`/`Assistance` tables shown above.
 
-## 2. People and positions
-
-The smallest, simplest piece of the model — deliberately kept that way.
+## 2. People, positions, and Centre association
 
 ```mermaid
 erDiagram
     POSITION ||--o{ RESOURCES : "PositionTitle FK"
+    RESOURCES ||--o{ RESOURCECENTRES : "FullName FK"
+    CENTRES ||--o{ RESOURCECENTRES : "CentreCode FK"
 
     POSITION {
         varchar Title PK
@@ -148,20 +148,41 @@ erDiagram
         varchar FirstName
         varchar LastName
         varchar PositionTitle FK
+        varchar FullName "computed"
+    }
+    RESOURCECENTRES {
+        varchar Resource FK
+        varchar CentreCode FK
     }
 ```
 
 **As-built note**: every copy of `Resources` (in `preparation.xlsx` and
 every centre file) carries a computed `FullName` column
-(`=FirstName & " " & LastName`) not in the DBML — it's what Step 3's
+(`=FirstName & " " & LastName`) not in the DBML — it's what Step 4's
 Resource picker and every downstream FK to a Resource actually key off,
 since the DBML's `(FirstName, LastName)` composite isn't practical as an
 Excel dropdown/lookup key.
 
-## 3. Centre Lead data entry (Steps 1-3)
+**`ResourceCentres`, added 2026-09-03**: a many-to-many join table — a
+Resource can be associated with more than one Centre. It only exists in
+`preparation.xlsx`; each centre file's own `Resources` copy is
+pre-filtered to just that centre's associated people (via a Power Query
+join+filter, see `wire_reference_data.py`'s `resources_formula()`), so
+there's nothing left to relate once it's loaded there. Management's own
+`preparation.xlsx` Data Model keeps the relationship (for reporting —
+"who's associated with which centres") since it's the one place that
+needs the unfiltered, global view.
 
-What each centre file's own three input tables look like, and how they
-relate back to the reference data above.
+## 3. Centre Lead data entry (Steps 1, 3, 4)
+
+What each centre file's own three *schema* tables look like, and how they
+relate back to the reference data above. Step 2 - Select Priorities
+(added 2026-09-03) isn't its own entity here — it's a UI-only shortlist
+that narrows Step 3's Priority Title dropdown to what the Centre Lead
+picked, with no new schema underneath it; see
+[`management-user-guide.md`](management-user-guide.md) for the workflow
+and `excel-file-design.md`'s "Priority Selection (Step 2)" section for
+the mechanism.
 
 ```mermaid
 erDiagram
@@ -194,9 +215,9 @@ erDiagram
 | | PersonTotalPercent | computed |
 
 **As-built note, a real simplification from the draft DBML**: the draft
-schema has two separate tables for Step 2 — `TeamPriorities` (rank) and
+schema has two separate tables for ranking — `TeamPriorities` (rank) and
 `TeamPriorityAllocation` (% of team effort) — with the same composite key.
-The built workbooks merge these into one table, `Priorities` (the "Step 2 -
+The built workbooks merge these into one table, `Priorities` (the "Step 3 -
 Priorities & Ranking" sheet), since a Centre Lead ranks and allocates a
 Priority in the same action; splitting them into two tables/sheets would
 have meant re-picking the same Team+Priority twice for no benefit. This
@@ -219,23 +240,30 @@ diagrams above:
    `(Title, Type)` composite), not a surrogate ID.
 5. `Resources`' FK key is a computed `FullName`, not the DBML's
    `(FirstName, LastName)` composite.
-6. Step 2's `TeamPriorities` + `TeamPriorityAllocation` are merged into one
+6. Ranking's `TeamPriorities` + `TeamPriorityAllocation` are merged into one
    table, `Priorities`.
 7. `Priority` is split three ways by Type in every centre file (not in
    `preparation.xlsx`) — an implementation detail for live-refresh safety,
    not a schema change; see diagram 1's as-built note.
+8. `ResourceCentres` (2026-09-03) is new versus the draft DBML entirely —
+   a many-to-many join between `Resources` and `Centres` that didn't exist
+   before, added so each centre file's Resource picker can be scoped to
+   just that centre's associated people.
 
 ## Where each entity physically lives
 
 | DBML entity | `preparation.xlsx` | Centre file (`Centre-*.xlsx`) |
 |---|---|---|
-| Centres, Position, Resources, ProblemSet, InitiativeType, AssistanceType | Same names | Same names, Power-Query-refreshed from `preparation.xlsx` |
+| Centres, Position, ProblemSet, InitiativeType, AssistanceType | Same names | Same names, Power-Query-refreshed from `preparation.xlsx` |
+| Resources | `Resources` (all people) | `Resources` — Power-Query-refreshed AND filtered to just this centre's `ResourceCentres`-associated people |
+| ResourceCentres | `ResourceCentres` | Not present — filtering already happened in the query, nothing left to relate |
 | Priority | `Priority` | `PriorityTactical` / `PriorityInitiative` / `PriorityAssistance` |
 | Tactical / Initiative / Assistance | `Tactical` / `Initiative` / `Assistance` | `TacticalScores` / `InitiativeScores` / `AssistanceScores` |
 | RatingLookup | `RatingLookup` | `RatingLookup` — the one table that's a static copy, not live-refreshed |
 | Teams | — (Centre Lead's own data) | Sheet "Step 1 - Teams", table `Teams` |
-| TeamPriorities + TeamPriorityAllocation | — | Sheet "Step 2 - Priorities & Ranking", table `Priorities` |
-| ResourceAllocation | — | Sheet "Step 3 - Resource Allocation", table `ResourceAllocation` |
+| (no DBML entity — UI only) | — | Sheet "Step 2 - Select Priorities", table `PrioritySelection` |
+| TeamPriorities + TeamPriorityAllocation | — | Sheet "Step 3 - Priorities & Ranking", table `Priorities` |
+| ResourceAllocation | — | Sheet "Step 4 - Resource Allocation", table `ResourceAllocation` |
 
 The Consolidation workbook (`consolidation.xlsx`) doesn't introduce new
 entities — it combines `Teams`/`Priorities`/`ResourceAllocation` across all

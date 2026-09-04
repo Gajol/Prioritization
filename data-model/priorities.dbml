@@ -11,7 +11,20 @@ Table Resources {
   FirstName varchar(15)
   LastName varchar(15)
   PositionTitle varchar(50) [ref: > Position.Title]
-} 
+  FullName varchar(31) [note: "computed: FirstName & \" \" & LastName -- the practical join key everywhere, since (FirstName, LastName) isn't usable as a single dropdown/lookup key"]
+}
+
+// Many-to-many: a Resource can be associated with more than one Centre.
+// Each centre's own data-entry file only offers Resources associated with
+// that Centre (2026-09-03).
+Table ResourceCentres {
+  Resource varchar(31) [ref: > Resources.FullName]
+  CentreCode varchar(10) [ref: > Centres.CentreCode]
+
+  indexes {
+    (Resource, CentreCode) [pk]
+  }
+}
 
 Table Position { 
   Title varchar(50) [primary key]

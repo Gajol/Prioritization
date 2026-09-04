@@ -46,7 +46,7 @@ where the draft schema was ambiguous or impractical in Excel:
    Excel dropdown/lookup key.
 7. The draft's `TeamPriorities` (rank) and `TeamPriorityAllocation` (% of team
    effort) — two separate tables sharing the same composite key — are merged
-   into one table, `Priorities` (the "Step 2 - Priorities & Ranking" sheet): a
+   into one table, `Priorities` (the "Step 3 - Priorities & Ranking" sheet): a
    Centre Lead ranks and allocates a Priority in the same action, so splitting
    them into two tables/sheets would mean re-picking the same Team+Priority
    twice for no benefit.
@@ -61,9 +61,15 @@ The Centre Lead template deliberately avoids VBA — native Excel only. What tha
 - **Dropdowns** (Data Validation lists) keep Team, Type, Priority, Resource, and
   Position entries consistent with the master lists, and constrain both Allocation %
   columns to 5% steps.
-- **Dependent dropdown**: the Priority Title dropdown on 'Step 2' is filtered to the
-  team's Priority Type automatically, via `=INDIRECT($C3)` resolving to a defined
-  name literally named `Tactical`/`Initiative`/`Assistance` (see the gotcha below).
+- **Dependent dropdowns, two layers deep** (2026-09-03): Step 2's own Priority
+  Title dropdown is filtered by the row's own Type via `=INDIRECT($A2)` resolving
+  to a defined name literally named `Tactical`/`Initiative`/`Assistance` (the full
+  master list — see the gotcha below on why the name can't just be the Table's
+  own name). Step 3's Priority Title dropdown is filtered a second time — to
+  *only what was selected on Step 2*, matching the team's Type — via
+  `=INDIRECT("Selected"&$C2)` resolving to `SelectedTactical`/`SelectedInitiative`/
+  `SelectedAssistance`. See "Priority Selection (Step 2)" below for why, and for
+  the dynamic-array dead end that preceded the working design.
 - **Custom-formula validation** blocks bad entries as they're typed: duplicate team
   names, duplicate rank within a team.
 - **Live rollup + conditional formatting**: "Total %" columns recompute via
@@ -193,9 +199,9 @@ Excel, which is a real risk on a machine with other things open. `ExportAsFixedF
 has no such risk: it renders exactly the range asked for, from the Excel object
 itself, nothing else on screen.
 
-## Value/Risk band during ranking (Step 2)
+## Value/Risk band during ranking (Step 3)
 
-`templates/centre-template.xlsx`'s "Step 2 - Priorities & Ranking" has a
+`templates/centre-template.xlsx`'s "Step 3 - Priorities & Ranking" has a
 `Value/Risk (auto)` column: given the row's Priority Title and Type, it looks up
 Management's own Risk (Tactical) or Value (Initiative/Assistance) band label from
 the already-embedded `TacticalScores`/`InitiativeScores`/`AssistanceScores`
@@ -276,7 +282,7 @@ split the Consolidation workbook already uses.
    Consolidation's `SourceFolder` config uses, and for the same reason — a named
    Table survives being moved around the sheet, a hardcoded cell address doesn't),
    RatingLookup (still a static copy — see below for why), the small hardcoded
-   `Lookups` enum sheet, and Steps 1-3.
+   `Lookups` enum sheet, and Steps 1-4.
 2. `templates/scripts/wire_reference_data.py` — COM against a running Excel,
    authors a Power Query per remaining reference table
    (`Excel.Workbook(File.Contents(PrepFilePath), null, true){[Item="X",Kind="Table"]}[Data]`,
@@ -312,7 +318,7 @@ row positions fixed at generation time — refresh-unsafe by construction, since
 refresh that changes row counts would silently desync them:
 
 1. **The Priority dependent dropdown** (Step 2's Type → Priority list) and
-   **ResourceNameList** (Step 3's resource picker) both worked via defined names
+   **ResourceNameList** (Step 4's resource picker) both worked via defined names
    pointing at hardcoded row ranges (`type_bounds` math in the old
    `build_centre_template.py`, computed once at generation time). Priority is now
    3 separate Power Queries, split by Type in M
@@ -373,6 +379,121 @@ connection creation specifically. Resolved every time by closing all open
 workbooks in that Excel session (`Workbooks.Close`) and retrying — no code
 change involved. If this recurs, close every open workbook (not just the one
 being wired) before concluding the recipe itself is broken.
+
+## Priority Selection (Step 2)
+
+Added 2026-09-03. Before this, a Centre Lead picked Priorities ad hoc, one
+at a time, directly inside the Ranking table — the dropdown offered every
+Tactical/Initiative/Assistance priority on Management's master list,
+filtered only by the team's Type. Now there's an explicit first pass: a
+new sheet, **"Step 2 - Select Priorities"** (Team sheets renumbered to
+Step 1, Priorities & Ranking to Step 3, Resource Allocation to Step 4),
+where the Centre Lead picks every priority under consideration for their
+centre from the full master list — the same Type-then-Title dependent
+dropdown Ranking always had, just relocated. *That* selection becomes the
+only thing Step 3's Ranking dropdown offers, via three new defined names
+(`SelectedTactical`/`SelectedInitiative`/`SelectedAssistance`), one per
+Type.
+
+**A dead end worth recording**: the first design used `FILTER()` (Office
+2021 includes it) directly in each `SelectedX` defined name —
+`FILTER(PrioritySelection[Priority Title], PrioritySelection[Priority
+Type]="Tactical", "")` — filtering `PrioritySelection` live, no fixed row
+count to bake in. Two failures, found by testing before shipping (same
+discipline as everywhere else in this file):
+
+1. A `FILTER()`-based defined name silently corrupted the file on open
+   ("is a macro-free file, but contains macro-enabled content") until the
+   formula was written with an `_xlfn._xlws.` prefix
+   (`_xlfn._xlws.FILTER(...)`) — confirmed by having real Excel author an
+   equivalent formula itself, then inspecting the raw XML: a cell FORMULA
+   needs no such prefix, but a defined name's formula does. openpyxl has
+   no awareness of this and will happily write the unprefixed (broken)
+   text.
+2. Even with that fixed, **Excel's Data Validation "List" type cannot
+   consume a dynamic-array (`FILTER()`-based) defined name at all** —
+   confirmed decisively: `Validation.Add(Type=3, Formula1="=SelectedTactical")`
+   throws outright on a brand-new cell, no `INDIRECT` involved, while the
+   exact same call against a static named range (`YesNoList`, already
+   proven elsewhere in this workbook) works fine. Data Validation predates
+   dynamic arrays by well over a decade and Microsoft's implementation
+   apparently never grew support for this combination.
+
+**What actually works**: three hidden helper columns on
+`Step 2 - Select Priorities` (`Tactical Helper`/`Initiative Helper`/
+`Assistance Helper`), one per Type, each row a plain
+`=IF($A2="Tactical",$B2,"")`-style formula — no dynamic arrays, no future
+functions. `SelectedTactical` etc. are then plain structured-reference
+defined names (`PrioritySelection[Tactical Helper]`) — the exact same
+"defined name built on a structured reference" pattern `TeamNameList`
+(`Teams[Team Name]`) already proved works fine as a Data Validation list
+source; it's only a structured reference typed *directly* into a
+`DataValidation` formula that breaks (see the gotcha above on
+`dv_unique_team`). Blank cells in the helper column (rows of a different
+Type, or not-yet-used rows) are simply skipped by Excel's dropdown — no
+`IFERROR`/empty-fallback needed, unlike the `FILTER()` attempt. Verified
+by setting `Range.Value` to a selected vs. unselected priority and reading
+`Range.Validation.Value` (Excel's own "does this value pass its rule?"
+check) — `True`/`False` exactly as expected, for both the isolated
+mechanism and the real shipped `Centre-CYB.xlsx`.
+
+## Resources scoped to Centres (`ResourceCentres`)
+
+Added 2026-09-03, alongside Priority Selection. `Resources` previously had
+no Centre affiliation at all — every centre file's Step 4 (Resource
+Allocation) dropdown offered the same, identical 100-person roster, so in
+principle the same person could be picked in a centre they don't actually
+work for. Now a person can be associated with one or more Centres
+(many-to-many — some people genuinely split time across centres, so this
+isn't a strict one-Resource-one-Centre rule), via a new join table in
+`preparation.xlsx`, `ResourceCentres` (`Resource`, `CentreCode`), and each
+centre file's own `Resources` copy is filtered to just that centre's
+associated people.
+
+**The mechanism**: `wire_reference_data.py`'s `resources_formula()`
+replaces the old plain passthrough query with a join+filter: read both
+`Resources` and `ResourceCentres` from `preparation.xlsx`, filter
+`ResourceCentres` to rows matching *this file's own* `CentreCode`, then
+filter `Resources` to just those `FullName` matches. "This file's own
+CentreCode" is read via `Excel.CurrentWorkbook(){[Name="CentreCode"]}
+[Content]{0}[Column1]` — the same self-reference pattern `PREP_PATH_M`
+already used for `Config!PrepFilePath`, just against a plain single-cell
+defined name (`CentreCode`) instead of a one-row Table. Verified working
+directly before relying on it: a throwaway probe query reading
+`CentreCode` this way returned the correct stamped value.
+
+**A gotcha found while wiring this in**: `preparation.xlsx`'s own
+`Resources` table didn't have a `FullName` column before this (only the
+centre files' Power-Query-loaded copies did, computed via
+`Table.AddColumn`). Adding one to `preparation.xlsx` too — as a real Excel
+formula, `=A{row}&" "&B{row}`, so `ResourceCentres` has a proper join key
+in Management's own Data Model — meant `resources_formula()`'s original
+`Table.AddColumn(Resources, "FullName", ...)` step started failing with
+`[Expression.Error] The field 'FullName' already exists in the record.`,
+since the source table now already has one. Fixed by dropping that step
+entirely and reading the already-present `FullName` straight through.
+
+**Verified**: the CYB fixture's Resources table (28 people) matched the
+independently-computed ground truth (reading `ResourceCentres` directly
+via openpyxl and filtering to `CentreCode = "CYB"`) exactly, as a set, not
+just a count. Each of the 6 real centre files ended up with a different
+row count (28/32/26/22/23/33) after the real regeneration, confirming the
+filter is genuinely per-centre and not accidentally uniform. The master
+template (`centre-template.xlsx`, stamped `CentreCode = "EX"`) legitimately
+has zero associated resources — `EX` isn't a real centre code, so nothing
+in `ResourceCentres` matches it — which surfaces as one additional Data
+Model relationship failure specific to that file
+(`ResourceAllocation.Resource -> Resources.FullName`, since an empty
+dimension table still triggers the "no blanks on the one side" rule) on
+top of the two Teams-related failures every centre file already has;
+13/16 for the master template vs. 14/16 for the six real centres. Accepted
+as an inherent property of the master template being a generic scaffold,
+not a real centre — nothing shipped depends on that specific relationship.
+
+`consolidation.xlsx`'s own embedded `Resources` reference copy
+deliberately stays the full, unfiltered list (`build_consolidation.py`
+unchanged) — Management needs to see every person for reporting, not one
+centre's slice.
 
 ## Consolidation workbook
 
@@ -596,7 +717,7 @@ figures exactly).
 python management/scripts/build_preparation.py management/preparation.xlsx
 
 # Centre Lead template -- stage 1 shell only (RatingLookup + Lookups +
-# Instructions + Steps 1-3). Stage 2 (the other 10 reference tables,
+# Instructions + Steps 1-4). Stage 2 (the other 10 reference tables,
 # Power-Query-refreshable) is wire_reference_data.py, below, and must run
 # before the file is usable -- see "Resolved: static snapshot vs. live
 # refresh" above.

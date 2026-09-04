@@ -30,10 +30,13 @@ import pywintypes
 import win32com.client as win32
 
 TABLES = ["Centres", "Position", "ProblemSet", "InitiativeType", "AssistanceType",
-          "RatingLookup", "Resources", "Priority", "Tactical", "Initiative", "Assistance"]
+          "RatingLookup", "Resources", "ResourceCentres", "Priority", "Tactical",
+          "Initiative", "Assistance"]
 
 RELATIONSHIPS = [
     ("Resources", "PositionTitle", "Position", "Title"),
+    ("ResourceCentres", "Resource", "Resources", "FullName"),
+    ("ResourceCentres", "CentreCode", "Centres", "CentreCode"),
     ("Tactical", "PriorityReference", "Priority", "Title"),
     ("Tactical", "ProblemSet", "ProblemSet", "Title"),
     ("Tactical", "Actor", "Centres", "CentreCode"),

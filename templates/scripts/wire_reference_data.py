@@ -3,8 +3,9 @@ Stage 2 of the Centre Lead workbook build (after build_centre_template.py):
 authors Power Query connections back to preparation.xlsx for every
 reference table EXCEPT RatingLookup, loads each into a worksheet Table,
 restyles it to match the rest of the workbook, and wires the defined
-names Step 2/3's dropdowns depend on. This is what makes routine reference
--data updates (a new Priority, a new Resource, a new Centre) something
+names several of the Centre Lead Step sheets' dropdowns depend on. This
+is what makes routine reference-data updates (a new Priority, a new
+Resource, a new Centre) something
 Management can push out with Data > Refresh All in plain Excel — no
 Python needed — instead of re-running build_centre_template.py and
 redistributing the file. See CLAUDE.md's Status entry (2026-09-01) for
@@ -34,16 +35,16 @@ fixed row positions that a refresh could invalidate:
 
 - Priority is split into 3 Power Queries (PriorityTactical/
   PriorityInitiative/PriorityAssistance, M-filtered by Type), each loaded
-  to its own small Table. Step 2's dependent Priority dropdown then reads
-  a defined name (Tactical/Initiative/Assistance, as before -- required
-  by the sheet's INDIRECT($C2) formula, which passes the literal Type
-  string) that's now a structured reference (e.g. PriorityTactical[Title])
-  instead of a hardcoded row range -- it auto-sizes with the table on
-  every refresh, with no row-bound math to keep in sync. Before this,
-  build_centre_template.py computed fixed A$2:A$18-style ranges at
-  generation time; those would silently go stale the moment a refresh
-  added or removed a Priority of that Type.
-- ResourceNameList (Step 3's resource picker) had the identical
+  to its own small Table. Step 2 - Select Priorities' own dependent
+  dropdown then reads a defined name (Tactical/Initiative/Assistance, as
+  before -- required by the sheet's INDIRECT($A2) formula, which passes
+  the literal Type string) that's now a structured reference (e.g.
+  PriorityTactical[Title]) instead of a hardcoded row range -- it
+  auto-sizes with the table on every refresh, with no row-bound math to
+  keep in sync. Before this, build_centre_template.py computed fixed
+  A$2:A$18-style ranges at generation time; those would silently go stale
+  the moment a refresh added or removed a Priority of that Type.
+- ResourceNameList (Step 4's resource picker) had the identical
   fixed-range problem; fixed the same way, now =Resources[FullName].
 
 The Tactical/Initiative/Assistance scoring tables' band-colour
@@ -53,7 +54,7 @@ same reason -- a genuine Table-column CF rule (as opposed to a CF rule
 that merely happens to cover a table's current extent) is tracked by
 Excel and auto-extends when the table grows or shrinks on refresh.
 
-Step 2's Value/Risk (auto) column and Step 3's Position Title (auto)
+Step 3's Value/Risk (auto) column and Step 4's Position Title (auto)
 column are ALSO set here, at the very end of main(), not by
 build_centre_template.py -- a real bug found and fixed 2026-09-01. Those
 two formulas reference TacticalScores/InitiativeScores/AssistanceScores/
@@ -78,8 +79,23 @@ after the tables they reference genuinely exist. Both target sheets are
 protected (computed cells locked, same as always), which blocks writing
 into them at all -- even via COM -- so main() unprotects each sheet
 immediately before its Range.Formula assignment and reprotects it right
-after; unlike the reference sheets above, Steps 2/3 never need to stay
+after; unlike the reference sheets above, Steps 3/4 never need to stay
 unprotected, since they're static input tables, not Power-Query-driven.
+
+Resources is filtered to just the people associated with THIS centre file
+(2026-09-03), not the full 100-person roster -- via a new preparation.xlsx
+reference table, ResourceCentres (Resource, CentreCode), a many-to-many
+join: a Resource can be associated with more than one Centre, so can
+appear in more than one centre file, but each centre file only ever sees
+its own slice. The query reads the current workbook's own CentreCode
+defined name (CENTRE_CODE_M, mirroring PREP_PATH_M's pattern exactly --
+confirmed by testing that Excel.CurrentWorkbook(){[Name="CentreCode"]}
+correctly resolves against the CURRENT file, the same way
+{[Name="Config"]} already does), filters ResourceCentres to that code,
+then filters Resources to just those FullName matches. Consolidation's
+own embedded Resources copy (build_consolidation.py) deliberately stays
+the full, unfiltered list -- Management needs to see everyone, not one
+centre's slice.
 
 RatingLookup is the one reference table deliberately NOT converted here
 -- still built as a static copy by build_centre_template.py. It's a
@@ -95,7 +111,7 @@ build_preparation.py and a redistributed file, same as any structural
 change.
 
 These 12 sheets are deliberately NOT sheet-protected, unlike the earlier
-static-copy version and unlike Steps 1-3. Confirmed by direct testing
+static-copy version and unlike Steps 1-4. Confirmed by direct testing
 (2026-09-01) that Excel blocks a Table from growing or shrinking on
 refresh under sheet protection -- the exact same "Table can't resize
 while its sheet is protected" constraint already documented for Step 1 -
@@ -135,6 +151,7 @@ from build_centre_template import (  # noqa: E402
 )
 
 PREP_PATH_M = 'Excel.CurrentWorkbook(){[Name="Config"]}[Content]{0}[PrepFilePath]'
+CENTRE_CODE_M = 'Excel.CurrentWorkbook(){[Name="CentreCode"]}[Content]{0}[Column1]'
 
 # (query_name, sheet_name, table_name, source_table_in_prep, col_widths, extra_m)
 SIMPLE_TABLES = [
@@ -143,9 +160,9 @@ SIMPLE_TABLES = [
     ("ProblemSet", "ProblemSet", "ProblemSet", "ProblemSet", [6, 28, 14, 18], None),
     ("InitiativeType", "InitiativeType", "InitiativeType", "InitiativeType", [6, 32, 14, 18, 18], None),
     ("AssistanceType", "AssistanceType", "AssistanceType", "AssistanceType", [6, 28, 14, 18, 18], None),
-    ("Resources", "Resources", "Resources", "Resources", [16, 16, 26, 26],
-     'Table.AddColumn(Data, "FullName", each [FirstName] & " " & [LastName])'),
 ]
+
+RESOURCES_WIDTHS = [16, 16, 26, 26]
 
 # (query_name, sheet_name, table_name, priority_type, col_widths)
 PRIORITY_SPLIT = [
@@ -170,7 +187,8 @@ SHEET_ORDER = [
     "Priority - Initiative", "InitiativeType", "Initiative",
     "Priority - Assistance", "AssistanceType", "Assistance",
     "RatingLookup", "Lookups",
-    "Step 1 - Teams", "Step 2 - Priorities & Ranking", "Step 3 - Resource Allocation",
+    "Step 1 - Teams", "Step 2 - Select Priorities",
+    "Step 3 - Priorities & Ranking", "Step 4 - Resource Allocation",
 ]
 
 
@@ -195,6 +213,34 @@ def priority_split_formula(priority_type):
         f'    Source = Excel.Workbook(File.Contents(PrepFilePath), null, true),\n'
         f'    Data = Source{{[Item="Priority",Kind="Table"]}}[Data],\n'
         f'    Filtered = Table.SelectRows(Data, each [Type] = "{priority_type}")\n'
+        f'in\n'
+        f'    Filtered'
+    )
+
+
+def resources_formula():
+    # Resources is filtered to just the people associated with THIS
+    # centre file's own CentreCode, via the ResourceCentres many-to-many
+    # join table -- a Resource can be associated with more than one
+    # Centre (so appears in more than one centre file), but each centre
+    # file only ever sees its own slice. CENTRE_CODE_M mirrors PREP_PATH_M
+    # exactly (reading a defined name from the CURRENT workbook, not an
+    # external one) -- confirmed by testing (2026-09-03) this resolves
+    # correctly against the CentreCode defined name
+    # build_centre_template.py already stamps on the Instructions sheet.
+    # Resources already has its own FullName column in preparation.xlsx
+    # (added 2026-09-03 as the join key for ResourceCentres/preparation.xlsx's
+    # own Data Model -- see build_preparation.py) -- read it as-is, don't
+    # recompute it here.
+    return (
+        f'let\n'
+        f'    PrepFilePath = {PREP_PATH_M},\n'
+        f'    ThisCentreCode = {CENTRE_CODE_M},\n'
+        f'    Source = Excel.Workbook(File.Contents(PrepFilePath), null, true),\n'
+        f'    Resources = Source{{[Item="Resources",Kind="Table"]}}[Data],\n'
+        f'    ResourceCentres = Source{{[Item="ResourceCentres",Kind="Table"]}}[Data],\n'
+        f'    MyAssociations = Table.SelectRows(ResourceCentres, each [CentreCode] = ThisCentreCode),\n'
+        f'    Filtered = Table.SelectRows(Resources, each List.Contains(MyAssociations[Resource], [FullName]))\n'
         f'in\n'
         f'    Filtered'
     )
@@ -277,6 +323,13 @@ def main(workbook_name):
         if lo is not None:
             style_table(wb.Worksheets(sheet_name), lo, widths)
 
+    lo = load_query_to_table(
+        wb, "Resources", resources_formula(), "Resources", "Resources",
+        existing_queries, existing_sheets, existing_tables,
+    )
+    if lo is not None:
+        style_table(wb.Worksheets("Resources"), lo, RESOURCES_WIDTHS)
+
     for query_name, sheet_name, table_name, ptype, widths in PRIORITY_SPLIT:
         lo = load_query_to_table(
             wb, query_name, priority_split_formula(ptype), sheet_name, table_name,
@@ -342,29 +395,29 @@ def main(workbook_name):
     # old per-row openpyxl loop, one COM call instead of N_ROWS.
     # Both sheets are protected (computed cells locked -- see
     # build_centre_template.py), which blocks writing into them even via
-    # COM; unlike the reference sheets above, Steps 2/3 don't need to
+    # COM; unlike the reference sheets above, Steps 3/4 don't need to
     # stay unprotected for a live refresh (they're the Centre Lead's own
     # static input tables, never Power-Query-driven), so a temporary
     # unprotect/reprotect around just this write is safe and simplest.
     last_row = N_ROWS + 1
-    ws_step2 = wb.Worksheets("Step 2 - Priorities & Ranking")
-    ws_step2.Unprotect()
-    ws_step2.Range(f"G2:G{last_row}").Formula = (
+    ws_step3 = wb.Worksheets("Step 3 - Priorities & Ranking")
+    ws_step3.Unprotect()
+    ws_step3.Range(f"G2:G{last_row}").Formula = (
         '=IF($B2="","",'
         'IF($C2="Tactical",IFERROR(INDEX(TacticalScores[RiskLabel],MATCH($B2,TacticalScores[PriorityReference],0)),"unknown"),'
         'IF($C2="Initiative",IFERROR(INDEX(InitiativeScores[ValueLabel],MATCH($B2,InitiativeScores[PriorityReference],0)),"unknown"),'
         'IF($C2="Assistance",IFERROR(INDEX(AssistanceScores[ValueLabel],MATCH($B2,AssistanceScores[PriorityReference],0)),"unknown"),'
         '""))))'
     )
-    ws_step2.Protect()
-    print("OK formula set: Step 2 - Priorities & Ranking!G2:G{}".format(last_row))
-    ws_step3 = wb.Worksheets("Step 3 - Resource Allocation")
-    ws_step3.Unprotect()
-    ws_step3.Range(f"B2:B{last_row}").Formula = (
+    ws_step3.Protect()
+    print("OK formula set: Step 3 - Priorities & Ranking!G2:G{}".format(last_row))
+    ws_step4 = wb.Worksheets("Step 4 - Resource Allocation")
+    ws_step4.Unprotect()
+    ws_step4.Range(f"B2:B{last_row}").Formula = (
         '=IF($A2="","",IFERROR(INDEX(Resources[PositionTitle],MATCH($A2,Resources[FullName],0)),"unknown resource"))'
     )
-    ws_step3.Protect()
-    print("OK formula set: Step 3 - Resource Allocation!B2:B{}".format(last_row))
+    ws_step4.Protect()
+    print("OK formula set: Step 4 - Resource Allocation!B2:B{}".format(last_row))
 
     for name in reversed(SHEET_ORDER):
         if name in {s.Name for s in wb.Worksheets}:

@@ -159,16 +159,22 @@ Write these as Markdown in `/docs`:
   centre-template.xlsx regenerated and re-verified. See
   excel-file-design.md for the full writeup.
 - `templates/centre-template.xlsx` — Centre Lead data-entry workbook
-  (Teams, Priorities & Ranking, Resource Allocation), native Excel
-  validation only, no VBA. Built in 2 stages now (2026-09-01) —
-  build_centre_template.py (shell + RatingLookup + Steps 1-3) then
+  (Teams, Select Priorities, Priorities & Ranking, Resource Allocation —
+  4 Steps as of 2026-09-03, see the Priority Selection entry below),
+  native Excel validation only, no VBA. Built in 2 stages (2026-09-01) —
+  build_centre_template.py (shell + RatingLookup + Steps 1-4) then
   templates/scripts/wire_reference_data.py (the other 10 reference
   tables, Power-Query-refreshable) — see that RESOLVED entry below for
   the full story. Shares preparation.xlsx's data model — same table
   names/columns, except Priority is split 3 ways by Type
-  (PriorityTactical/PriorityInitiative/PriorityAssistance). Wired into
-  its own Power Pivot Data Model — 14/16 relationships live,
-  permanently: the 2 involving Teams can never be created, by design
+  (PriorityTactical/PriorityInitiative/PriorityAssistance) and Resources
+  is filtered to just this centre's associated people (2026-09-03, via
+  the new ResourceCentres join table — see its own entry below). Wired
+  into its own Power Pivot Data Model — 14/16 relationships live for a
+  real centre file (13/16 for the generic master template specifically,
+  since its "EX" placeholder CentreCode has no real ResourceCentres
+  associations — see the Resources-scoping entry below), permanently:
+  the 2 involving Teams can never be created, by design
   (see the RESOLVED entry below on Step 1 - Teams becoming a real
   15-row Table). Power Pivot rejects a relationship whose "one" side key
   column contains *any* blank, and Teams always has 13+ blank rows for
@@ -225,7 +231,9 @@ Write these as Markdown in `/docs`:
     accepted: this reopens the Teams-relationship Power Pivot blocker
     covered above, permanently rather than just pre-fill — judged worth
     it since nothing shipped depends on that relationship today.
-  - NEW (2026-08-17): "Step 2 - Priorities & Ranking" has a `Value/Risk
+  - NEW (2026-08-17): "Step 2 - Priorities & Ranking" (renamed
+    "Step 3 - Priorities & Ranking" on 2026-09-03 — see the Priority
+    Selection entry below) has a `Value/Risk
     (auto)` column — Management's Risk (Tactical) or Value (Initiative/
     Assistance) band for the row's Priority, looked up from the already-
     embedded scoring tables and colour-coded, shown at ranking time so a
@@ -480,3 +488,55 @@ Write these as Markdown in `/docs`:
      a real, full-size Table from generation time instead, sidestepping the
      resize question entirely (nothing needs to resize under protection
      because nothing needs to grow).
+- NEW (2026-09-03): Priority Selection. `templates/centre-template.xlsx`
+  gained a new sheet, "Step 2 - Select Priorities" (Team sheets stay
+  Step 1; Priorities & Ranking and Resource Allocation renumbered to
+  Steps 3 and 4). A Centre Lead now picks every priority under
+  consideration for their centre from Management's full master list on
+  this new sheet first; Step 3's Ranking dropdown then only offers
+  *that* shortlist, further narrowed to the team's own Type — not the
+  full master list directly, as before. Two real dead ends found before
+  landing on the working design (both fully written up in
+  excel-file-design.md's "Priority Selection (Step 2)" section, worth
+  reading before reaching for `FILTER()` in a defined name anywhere else
+  in this project): a `FILTER()`-based defined name needs an
+  `_xlfn._xlws.` prefix in its raw formula text or Excel refuses to open
+  the file at all (openpyxl has no awareness of this), and even fixed,
+  Excel's Data Validation "List" type cannot consume a dynamic-array
+  defined name as its source under any circumstance — confirmed
+  decisively via `Validation.Add` throwing outright with no `INDIRECT`
+  involved. Shipped design: three hidden plain-`IF()` helper columns on
+  the new sheet, one per Type, with `SelectedTactical`/
+  `SelectedInitiative`/`SelectedAssistance` as ordinary structured-
+  reference defined names over them (`PrioritySelection[Tactical
+  Helper]`, etc.) — the same already-proven pattern `TeamNameList` uses,
+  no dynamic arrays anywhere. Verified via `Range.Validation.Value`
+  (`True`/`False` for selected/unselected, both in isolation and on the
+  real shipped `Centre-CYB.xlsx`) and a full formula-error sweep (zero)
+  after a real Save+reopen cycle.
+- NEW (2026-09-03): Resources scoped to Centres. `Resources` previously
+  had no Centre affiliation — every centre file's Step 4 dropdown showed
+  the same 100-person roster regardless of who actually works where. A
+  new `preparation.xlsx` table, `ResourceCentres` (`Resource`,
+  `CentreCode`), is a many-to-many join — a person can be associated
+  with more than one Centre — and each centre file's own `Resources`
+  copy is now filtered (via `wire_reference_data.py`) to just that
+  centre's associated people, reading the file's own `CentreCode`
+  defined name from inside the Power Query the same way `PrepFilePath`
+  already was. `preparation.xlsx`'s own `Resources` table gained a real
+  `FullName` formula column (`=A{r}&" "&B{r}`) it didn't have before, as
+  the join key for `ResourceCentres` in Management's own Data Model (now
+  15/15 relationships there, up from 13/13) — which broke the centre
+  files' own `resources_formula()` in a small, findable way (`Table.AddColumn`
+  tried to add a `FullName` column that already existed in the source
+  data) until that redundant step was removed. `consolidation.xlsx`'s own
+  `Resources` copy deliberately stays global/unfiltered — Management
+  needs to see everyone. Full write-up, including the master-template
+  13/16-vs-14/16 edge case, in excel-file-design.md's "Resources scoped
+  to Centres" section. Verified: the CYB dev fixture's filtered Resources
+  table matched an independently-computed ground truth exactly as a set;
+  all 6 real centre files landed on different row counts
+  (28/32/26/22/23/33), confirming the filter is genuinely per-centre; the
+  Consolidation regression (5 hand-computed FTE values + Total FTE) still
+  matched exactly after the full regeneration, since none of it touches
+  Resources scoping.

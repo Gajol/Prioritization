@@ -25,12 +25,12 @@ Usage:
     2. python make_test_centres.py <preparation.xlsx>
 
 Runs the full real pipeline for each fixture: build_centre_template.main()
-(stage 1 shell) -> fill_fixture() (openpyxl, writes the Step 1-3 data
+(stage 1 shell) -> fill_fixture() (openpyxl, writes the Step 1-4 data
 directly rather than simulating UI entry) -> wire_reference_data.py
 (stage 2, authors the Power-Query reference sheets) -> wire_data_model.py
 (Power Pivot Data Model). A fixture isn't realistic without stages 2/3,
 since build_centre_template.py alone no longer creates the reference
-sheets Step 2's formulas depend on (TacticalScores/InitiativeScores/
+sheets Step 3's formulas depend on (TacticalScores/InitiativeScores/
 AssistanceScores, etc.) -- see templates/scripts/wire_reference_data.py's
 docstring.
 
@@ -71,7 +71,15 @@ OUT_DIR = Path(__file__).resolve().parent / "output"
 # (centre_code, teams, priorities, resource_allocations)
 #   teams:        [(team_name, resources_dedicated, priority_type), ...]
 #   priorities:   [(team_name, priority_title, rank, resourced, alloc_pct), ...]
-#   allocations:  [(resource_full_name, team_name, alloc_pct), ...]
+#   allocations:  [(resource_pool_index, team_name, alloc_pct), ...] -- an
+#     INDEX into that centre's own ResourceCentres-associated pool, not a
+#     literal name: which specific people are associated with which centre
+#     is itself randomly synthesized (build_preparation.py), so a
+#     hardcoded name here could easily land on someone NOT actually
+#     associated with this fixture's centre once Resources became
+#     per-centre-filtered (2026-09-03) -- resolved to a real name in
+#     main(), after reading each centre's actual pool back out of the
+#     freshly-generated preparation.xlsx.
 FIXTURES = [
     (
         "CYB",
@@ -85,9 +93,9 @@ FIXTURES = [
             ("Threat Intel", "Launch predictive analytics pilot", 1, "Yes", 1.00),
         ],
         [
-            ("Kevin Johnson", "Firewall Team", 0.50),
-            ("John Brown", "Firewall Team", 0.50),
-            ("Chen Johnson", "Threat Intel", 1.00),
+            (0, "Firewall Team", 0.50),
+            (1, "Firewall Team", 0.50),
+            (2, "Threat Intel", 1.00),
         ],
     ),
     (
@@ -99,7 +107,7 @@ FIXTURES = [
             ("Ops Team", "Provide cross-centre threat-briefing support", 1, "Yes", 1.00),
         ],
         [
-            ("Thomas Kowalski", "Ops Team", 0.75),
+            (0, "Ops Team", 0.75),
         ],
     ),
     (
@@ -111,13 +119,13 @@ FIXTURES = [
             ("Ops Team", "Reduce third-party vendor risk exposure", 1, "Yes", 1.00),
         ],
         [
-            ("Emma Chen", "Ops Team", 0.25),
+            (0, "Ops Team", 0.25),
         ],
     ),
 ]
 
 
-def fill_fixture(out_path, teams, priorities, allocations):
+def fill_fixture(out_path, teams, priorities, allocations, resource_pool):
     wb = openpyxl.load_workbook(out_path)
 
     ws = wb["Step 1 - Teams"]
@@ -129,7 +137,28 @@ def fill_fixture(out_path, teams, priorities, allocations):
     # Teams is now a real 15-row Table from generation time (see
     # build_centre_template.py's Step 1 comment) — no resize needed here.
 
-    ws = wb["Step 2 - Priorities & Ranking"]
+    # Step 2 - Select Priorities: derived from `priorities` + each row's
+    # team's own Type, deduplicated, in first-seen order -- a real Centre
+    # Lead would select these first, before ranking them, so a fixture
+    # that skipped Step 2 wouldn't be a realistic exercise of the
+    # two-stage flow (see build_centre_template.py's Step 2/3 split).
+    team_type = {name: ptype for name, _dedicated, ptype in teams}
+    seen = set()
+    selections = []
+    for team, title, _rank, _resourced, _pct in priorities:
+        ptype = team_type[team]
+        if title not in seen:
+            seen.add(title)
+            selections.append((ptype, title))
+    ws = wb["Step 2 - Select Priorities"]
+    for i, (ptype, title) in enumerate(selections):
+        row = 2 + i
+        ws.cell(row=row, column=1, value=ptype)
+        ws.cell(row=row, column=2, value=title)
+        # Columns C-E (Tactical/Initiative/Assistance Helper) are formulas
+        # already baked into the template — nothing to fill here.
+
+    ws = wb["Step 3 - Priorities & Ranking"]
     for i, (team, title, rank, resourced, pct) in enumerate(priorities):
         row = 2 + i
         ws.cell(row=row, column=1, value=team)
@@ -139,10 +168,10 @@ def fill_fixture(out_path, teams, priorities, allocations):
         cell = ws.cell(row=row, column=6, value=pct)
         cell.number_format = "0%"
 
-    ws = wb["Step 3 - Resource Allocation"]
-    for i, (resource, team, pct) in enumerate(allocations):
+    ws = wb["Step 4 - Resource Allocation"]
+    for i, (pool_idx, team, pct) in enumerate(allocations):
         row = 2 + i
-        ws.cell(row=row, column=1, value=resource)
+        ws.cell(row=row, column=1, value=resource_pool[pool_idx])
         ws.cell(row=row, column=3, value=team)
         cell = ws.cell(row=row, column=4, value=pct)
         cell.number_format = "0%"
@@ -164,13 +193,19 @@ def wire_fixture(out_path):
 
 def main(prep_path):
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    _, centres_rows = read_table(openpyxl.load_workbook(prep_path, data_only=True), "Centres")
+    prep_wb = openpyxl.load_workbook(prep_path, data_only=True)
+    _, centres_rows = read_table(prep_wb, "Centres")
     names_by_code = {row[2]: row[1] for row in centres_rows}
+    _, rc_rows = read_table(prep_wb, "ResourceCentres")
+    pool_by_code = {}
+    for resource, code in rc_rows:
+        pool_by_code.setdefault(code, []).append(resource)
 
     for code, teams, priorities, allocations in FIXTURES:
         out_path = OUT_DIR / f"Centre-{code}.xlsx"
         build_centre(prep_path, str(out_path), centre_name=names_by_code[code], centre_code=code)
-        fill_fixture(out_path, teams, priorities, allocations)
+        resource_pool = pool_by_code[code]
+        fill_fixture(out_path, teams, priorities, allocations, resource_pool)
         wire_fixture(out_path)
         print(f"fixture ready: {out_path}")
 

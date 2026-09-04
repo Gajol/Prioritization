@@ -180,25 +180,34 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
         ("How to use this workbook", 12, True),
         ("1. 'Step 1 - Teams' — list every team this centre has, whether it "
          "has dedicated resources, and which Priority Type it works on.", None, False),
-        ("2. 'Step 2 - Priorities & Ranking' — for each team, pick priorities "
-         "from Management's master list (only priorities matching the "
-         "team's Priority Type will be offered), rank them, mark whether "
-         "the team is actually resourcing it, and what share of the team's "
-         "effort it gets.", None, False),
-        ("3. 'Step 3 - Resource Allocation' — pick each person from "
-         "Management's Resources list, which team they're on, and what "
-         "share of their time goes to that team. Their position fills in "
+        ("2. 'Step 2 - Select Priorities' — from Management's master list, "
+         "pick every priority your centre is considering, across all three "
+         "Types. This becomes the shortlist Step 3's ranking dropdown "
+         "offers — nothing else.", None, False),
+        ("3. 'Step 3 - Priorities & Ranking' — for each team, pick "
+         "priorities from your Step 2 shortlist (only priorities matching "
+         "the team's Priority Type will be offered), rank them, mark "
+         "whether the team is actually resourcing it, and what share of "
+         "the team's effort it gets.", None, False),
+        ("4. 'Step 4 - Resource Allocation' — pick each person from "
+         "Management's Resources list (only people associated with your "
+         "centre will be offered), which team they're on, and what share "
+         "of their time goes to that team. Their position fills in "
          "automatically.", None, False),
         ("", None, False),
         ("Worked example", 12, True),
         ("Say your centre has a team called 'Analytics Squad', dedicated "
          "(Yes) and working Tactical priorities. On 'Step 1 - Teams' you'd "
          "enter: Team Name = Analytics Squad, Resources Dedicated = Yes, "
-         "Priority Type = Tactical. On 'Step 2', a row for that team might "
-         "read: Priority Title = (pick one of the Tactical priorities "
-         "offered), Rank = 1, Resourced = Yes, Allocation % = 60%. On "
-         "'Step 3', a person on that team might read: Resource = (pick "
-         "them), Team Name = Analytics Squad, Allocation % = 50%.", None, False),
+         "Priority Type = Tactical. On 'Step 2', you'd add a row: Priority "
+         "Type = Tactical, Priority Title = (pick one of the Tactical "
+         "priorities offered) — do this for every priority your centre is "
+         "considering, of any Type. On 'Step 3', a row for that team might "
+         "then read: Priority Title = (pick one of the Tactical priorities "
+         "*you selected in Step 2*), Rank = 1, Resourced = Yes, Allocation "
+         "% = 60%. On 'Step 4', a person on that team might read: "
+         "Resource = (pick them), Team Name = Analytics Squad, "
+         "Allocation % = 50%.", None, False),
         ("", None, False),
         ("Legend", 12, True),
         ("Yellow cells = type or pick your data here.", None, False),
@@ -348,9 +357,9 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     # ListRows.Add() mechanism also fails under protection. With no
     # protected-sheet mechanism to grow a Table at all, a Centre Lead's
     # data in any row past the Table's official range was silently invisible
-    # to TeamNameList, the Step 2 team dropdown, and every SUMIFS/lookup
+    # to TeamNameList, the Step 3 team dropdown, and every SUMIFS/lookup
     # against Teams[...]. Building the full 15 rows in up front (same
-    # pattern as Step 2/3, which use the real N_ROWS-row Table already)
+    # pattern as Steps 2-4, which use the real N_ROWS-row Table already)
     # fixes that outright, at the cost of reopening the Data Model
     # relationship blocker below for Teams specifically: Power Pivot
     # rejects a relationship whose "one" side contains any blank, and with
@@ -421,8 +430,95 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
         )
     ws.freeze_panes = "A2"
 
-    # ================================================================= Step 2 - Priorities & Ranking
-    ws = wb.create_sheet("Step 2 - Priorities & Ranking")
+    # ================================================================= Step 2 - Select Priorities
+    ws = wb.create_sheet("Step 2 - Select Priorities")
+    ws.sheet_view.showGridLines = False
+    # Columns C-E are helper columns, not something a Centre Lead fills in
+    # — see the note below on why they exist instead of a FILTER() formula
+    # — hidden so they don't clutter the sheet.
+    headers = ["Priority Type", "Priority Title",
+               "Tactical Helper", "Initiative Helper", "Assistance Helper"]
+    widths = [16, 50, 12, 12, 12]
+    for i, (h, w) in enumerate(zip(headers, widths), start=1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+        style_header(ws.cell(row=1, column=i, value=h))
+    for col_letter in ("C", "D", "E"):
+        ws.column_dimensions[col_letter].hidden = True
+
+    for r in range(2, last_row + 1):
+        style_body(ws.cell(row=r, column=1), editable=True)
+        style_body(ws.cell(row=r, column=2), editable=True)
+        # Type-sorted copies of this row's Priority Title, one column per
+        # Type, blank if this row isn't that Type. Plain IF() formulas,
+        # deliberately NOT FILTER(): confirmed by testing (2026-09-03)
+        # that Excel's Data Validation "List" type cannot consume a
+        # dynamic-array (FILTER()-based) defined name at all — fails even
+        # referenced directly with no INDIRECT involved (Validation.Add
+        # itself throws), while the exact same INDIRECT-of-a-defined-name
+        # pattern against a plain static range works fine (proven
+        # elsewhere in this workbook already, e.g. YesNoList). These three
+        # helper columns are what let Step 3's Ranking dropdown filter to
+        # "this row's Type, and only rows actually selected here" using
+        # nothing but that already-proven plain-named-range mechanism.
+        for col, ptype in ((3, "Tactical"), (4, "Initiative"), (5, "Assistance")):
+            cell = ws.cell(row=r, column=col)
+            style_computed(cell)
+            cell.value = f'=IF($A{r}="{ptype}",$B{r},"")'
+
+    tab = Table(displayName="PrioritySelection", ref=f"A1:E{last_row}")
+    tab.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
+    ws.add_table(tab)
+
+    dv_type_select = DataValidation(type="list", formula1="=PriorityTypeList", allow_blank=True)
+    dv_type_select.error = "Choose Tactical, Initiative, or Assistance."
+    dv_type_select.errorTitle = "Invalid entry"
+    ws.add_data_validation(dv_type_select)
+    dv_type_select.add(f"A2:A{last_row}")
+
+    # Same dependent-dropdown trick as the Ranking sheet below: pick Type
+    # first, Priority Title is then filtered to that Type's full master
+    # list (the plain Tactical/Initiative/Assistance defined names, still
+    # the complete list here — this sheet is where a Centre Lead narrows
+    # it down for the first time).
+    dv_priority_select = DataValidation(type="list", formula1="=INDIRECT($A2)", allow_blank=True)
+    dv_priority_select.error = "Pick a priority from Management's master list, matching the Type."
+    dv_priority_select.errorTitle = "Unknown priority"
+    ws.add_data_validation(dv_priority_select)
+    dv_priority_select.add(f"B2:B{last_row}")
+
+    # Plain range, not PrioritySelection[Priority Title] — see the note on
+    # dv_unique_team above (structured refs break Data Validation).
+    dv_unique_priority = DataValidation(
+        type="custom",
+        formula1=f'=AND($B2<>"",COUNTIF($B$2:$B${last_row},$B2)=1)',
+        allow_blank=True,
+    )
+    dv_unique_priority.error = "Each priority can only be selected once."
+    dv_unique_priority.errorTitle = "Duplicate priority"
+    ws.add_data_validation(dv_unique_priority)
+    dv_unique_priority.add(f"B2:B{last_row}")
+
+    ws.protection.sheet = True
+    ws.freeze_panes = "A2"
+
+    # Selected-and-Type-filtered lists for Step 3's Ranking dropdown below.
+    # Structured references, same proven pattern as TeamNameList
+    # (`Teams[Team Name]`) — a defined name built on a structured reference
+    # works fine as a Data Validation list source; it's only a structured
+    # reference typed *directly* into a DataValidation formula that breaks
+    # (see the note on dv_unique_team). Blanks in the helper column (rows
+    # of a different Type, or not-yet-used rows) are simply skipped by
+    # Excel's dropdown — no IFERROR/empty-fallback needed here, unlike the
+    # FILTER() attempt this replaced.
+    for ptype, col_name in (("Tactical", "Tactical Helper"),
+                             ("Initiative", "Initiative Helper"),
+                             ("Assistance", "Assistance Helper")):
+        wb.defined_names[f"Selected{ptype}"] = DefinedName(
+            f"Selected{ptype}", attr_text=f"PrioritySelection[{col_name}]",
+        )
+
+    # ================================================================= Step 3 - Priorities & Ranking
+    ws = wb.create_sheet("Step 3 - Priorities & Ranking")
     ws.sheet_view.showGridLines = False
     headers = ["Team Name", "Priority Title", "Type (auto)", "Rank", "Resourced",
                "Allocation % of Team Effort", "Value/Risk (auto)"]
@@ -467,11 +563,16 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     ws.add_data_validation(dv_team2)
     dv_team2.add(f"A2:A{last_row}")
 
-    # Dependent dropdown: the list source is INDIRECT(this row's auto Type),
-    # which resolves to the defined name "Tactical"/"Initiative"/"Assistance"
-    # — so only priorities matching the team's type are offered.
-    dv_priority = DataValidation(type="list", formula1="=INDIRECT($C2)", allow_blank=True)
-    dv_priority.error = "Pick a priority from Management's master list, matching the team's Priority Type."
+    # Dependent dropdown: the list source is INDIRECT("Selected" & this
+    # row's auto Type), resolving to the FILTER()-based Selected{Type}
+    # defined name from Step 2 — Step 2's shortlist, not Management's full
+    # master list, and further narrowed to the team's own Priority Type.
+    # $C2 itself still holds the plain "Tactical"/"Initiative"/"Assistance"
+    # text (other formulas/conditional formatting on this sheet compare
+    # against it directly), so the "Selected" prefix is added here rather
+    # than changing what $C2 stores.
+    dv_priority = DataValidation(type="list", formula1='=INDIRECT("Selected"&$C2)', allow_blank=True)
+    dv_priority.error = "Pick a priority from your Step 2 selection, matching the team's Priority Type."
     dv_priority.errorTitle = "Unknown priority"
     ws.add_data_validation(dv_priority)
     dv_priority.add(f"B2:B{last_row}")
@@ -526,8 +627,8 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     ws.protection.sheet = True
     ws.freeze_panes = "A2"
 
-    # ================================================================= Step 3 - Resource Allocation
-    ws = wb.create_sheet("Step 3 - Resource Allocation")
+    # ================================================================= Step 4 - Resource Allocation
+    ws = wb.create_sheet("Step 4 - Resource Allocation")
     ws.sheet_view.showGridLines = False
     headers = ["Resource", "Position Title (auto)", "Team Name",
                "Allocation % of Person Effort", "Person Total %"]
@@ -540,7 +641,7 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
         style_body(ws.cell(row=r, column=1), editable=True)
         # NOT written here: this formula references Resources, which
         # doesn't exist until stage 2 (wire_reference_data.py) creates it
-        # -- see the matching note on Step 2's Value/Risk (auto) column
+        # -- see the matching note on Step 3's Value/Risk (auto) column
         # above for why writing a cross-stage table reference in stage 1
         # would permanently corrupt it to #REF!.
         style_computed(ws.cell(row=r, column=2))
@@ -571,7 +672,7 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     ws.add_data_validation(dv_team3)
     dv_team3.add(f"C2:C{last_row}")
 
-    # Dropdown, not a hard block — see the note on dv_alloc2 in Step 2.
+    # Dropdown, not a hard block — see the note on dv_alloc2 in Step 3.
     # Person Total % still flags an overage visually (red).
     dv_alloc3 = DataValidation(type="list", formula1="=PercentIncrementsList", allow_blank=True)
     dv_alloc3.error = "Pick a value from the dropdown (5% steps)."
@@ -599,8 +700,8 @@ def main(prep_path, out_path, centre_name=None, centre_code=None):
     # actually built in a sane order for anyone opening the file between
     # the two stages.
     SHEET_ORDER = ["Instructions", "RatingLookup", "Lookups",
-                   "Step 1 - Teams", "Step 2 - Priorities & Ranking",
-                   "Step 3 - Resource Allocation"]
+                   "Step 1 - Teams", "Step 2 - Select Priorities",
+                   "Step 3 - Priorities & Ranking", "Step 4 - Resource Allocation"]
     wb._sheets = [wb[name] for name in SHEET_ORDER]
     wb.active = 0
     wb.save(out_path)

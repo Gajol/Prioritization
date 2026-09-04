@@ -24,7 +24,7 @@ flowchart LR
     classDef lead fill:#d1ecf1,stroke:#17a2b8,color:#0c5460
 
     A["1. Preparation<br/>edit preparation.xlsx"]:::excel --> B["2. Send Files<br/>clone the master yourself,<br/>or ask the Build person"]:::excel
-    B --> C["3. Data Collection<br/>Centre Leads fill in<br/>Steps 1-3, send back"]:::lead
+    B --> C["3. Data Collection<br/>Centre Leads fill in<br/>Steps 1-4, send back"]:::lead
     C --> D["4. Consolidation<br/>Refresh consolidation.xlsx,<br/>review the 3 PivotTables"]:::excel
     D -. next quarter .-> A
 ```
@@ -45,6 +45,7 @@ always could, this part never needed the Build person.
 | Centres | The six centres | Centre, CentreCode |
 | Position | Job titles/levels | Title, PositionArea, Position, Level |
 | Resources | People | FirstName, LastName, PositionTitle |
+| ResourceCentres | Which Centre(s) each person is associated with | Resource, CentreCode |
 | Priority | Every priority, all three types | Title, Type, Impact, Resources |
 | Tactical | Risk scoring for Tactical priorities | PriorityReference, Actor, ProblemSet, Intent, Capability, Consequence (Likelihood/Risk/band columns compute automatically) |
 | Initiative | Value scoring for Initiative priorities | PriorityReference, Actor, InitiativeType, Dividend, Feasibility, Cost (Value/band columns compute automatically) |
@@ -76,7 +77,25 @@ are the ones Excel guarantees will behave correctly.
 ### Adding a new Resource
 
 Add a row to **Resources**: FirstName, LastName, PositionTitle (spell it
-exactly as it appears on the **Position** sheet).
+exactly as it appears on the **Position** sheet). Then see "Associating a
+Resource with a Centre" below — without that, the person won't show up in
+*any* centre's Step 4 dropdown, even after a refresh.
+
+### Associating a Resource with a Centre
+
+A person only shows up in a centre's Resource picker (Step 4) if they're
+associated with that centre here. Someone can be associated with more
+than one Centre — this isn't exclusive, it's "which centres can pick this
+person," not "which centre does this person belong to."
+
+Add a row to **ResourceCentres** for each association: Resource (spell the
+full name exactly as it appears in Resources' FullName column — first and
+last name, one space between), CentreCode. A person working across two
+centres gets two rows, one per centre.
+
+This is one of the routine, Excel-only changes — no Build person needed,
+just edit `preparation.xlsx` and Data > Refresh All on the distributed
+files, same as adding a new Priority or Resource.
 
 ### Adding a new Centre
 
@@ -108,11 +127,11 @@ replacing a file that got lost or corrupted — **as long as nothing
 structural has changed** (no new column, new Priority Type, or
 `RatingLookup` change; see "When you need the Build person" below for
 those). Keep a copy of the blank master template — `centre-template.xlsx`,
-with Steps 1-3 empty — somewhere handy; ask the Build person for one if you
+with Steps 1-4 empty — somewhere handy; ask the Build person for one if you
 don't already have it.
 
 1. Open the blank master template — not a centre file that already has real
-   Team/Priority/Resource data typed into Steps 1-3.
+   Team/Priority/Resource data typed into Steps 1-4.
 2. **File > Save As**, and save it as `Centre-<CentreCode>.xlsx` (matching
    the code you used on the Centres sheet) into the folder you send from.
    Use **Save As on the open file** — not a copy-and-rename in File
@@ -125,7 +144,7 @@ don't already have it.
    > **Protect Sheet** again (defaults are fine, no password needed).
 4. **Data > Refresh All**, so the reference sheets reflect the current
    `preparation.xlsx`.
-5. Double-check Steps 1-3 are still blank before sending it out.
+5. Double-check Steps 1-4 are still blank before sending it out.
 
 ### Option B — ask the Build person
 
@@ -139,7 +158,7 @@ typically via SharePoint.
 
 ## 3. Data Collection — waiting on Centre Leads
 
-Nothing to build here. Centre Leads fill in Steps 1-3 following
+Nothing to build here. Centre Leads fill in Steps 1-4 following
 [`centre-lead-user-guide.md`](centre-lead-user-guide.md) and send the file
 back. Once you have all six back, collect them into **one folder** — the
 Consolidation workbook reads whatever's in that folder.
@@ -174,13 +193,15 @@ flowchart TD
 
     Q{What are you changing?}
     Q -->|New Priority| R1["Add a row to Priority AND the<br/>matching Tactical/Initiative/<br/>Assistance sheet"]:::excel
-    Q -->|New Resource| R2["Add a row to Resources"]:::excel
+    Q -->|New Resource| R2["Add a row to Resources,<br/>then to ResourceCentres"]:::excel
+    Q -->|Resource/Centre association only| R2b["Add a row to ResourceCentres"]:::excel
     Q -->|New Centre| R3["Add a row to Centres,<br/>then clone the blank master<br/>yourself (see Phase 2)"]:::excel
     Q -->|RatingLookup band/colour| R4["Ask the Build person —<br/>the one exception, stays static"]:::build
     Q -->|New column, new Priority Type,<br/>new dropdown, any structure change| R5["Ask the Build person"]:::build
 
     R1 --> F["Data > Refresh All on each<br/>already-distributed centre file"]:::excel
     R2 --> F
+    R2b --> F
 ```
 
 That's it for the Excel-only path: edit `preparation.xlsx`, then whoever has
